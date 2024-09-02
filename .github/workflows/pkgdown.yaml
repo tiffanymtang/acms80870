@@ -45,7 +45,6 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: JamesIves/github-pages-deploy-action@v4.5.0
         with:
-          working-directory: dsiplib
           clean: false
           branch: gh-pages
           folder: dsiplib/docs
