@@ -1,0 +1,17 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+.DS_Store
+
+*.Rproj
+
+data/
+
+notebooks/exploration.html
+
+notebooks/exploration.Rmd
+
+notebooks/lab1.pdf
+
+notebooks/lab1.Rmd
