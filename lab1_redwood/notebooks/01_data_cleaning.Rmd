@@ -1,0 +1,168 @@
+---
+title: "Lab 1 - Redwood Data"
+author: "Tiffany Tang"
+date: "`r Sys.Date()`"
+output: vthemes::vmodern
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE
+)
+
+for (fname in list.files(here::here("R"), pattern = "*.R")) {
+  source(here::here(file.path("R", fname)))
+}
+
+DATA_PATH <- here::here("data")
+```
+
+# Load Data {.tabset .tabset-vmodern}
+
+```{r load-data}
+# load dates data
+dates_orig <- load_dates_data(DATA_PATH)
+
+# load motes data
+motes_orig <- load_mote_location_data(DATA_PATH)
+
+# load redwood data
+redwood_all_orig <- load_redwood_data(DATA_PATH, source = "all")
+redwood_net_orig <- load_redwood_data(DATA_PATH, source = "net")
+redwood_log_orig <- load_redwood_data(DATA_PATH, source = "log")
+```
+
+## Quick Look {.tabset .tabset-pills .tabset-square}
+
+### Dates Data
+
+```{r}
+dates_orig
+skimr::skim(dates_orig)
+```
+
+### Motes Data
+
+```{r}
+motes_orig
+skimr::skim(motes_orig)
+```
+
+### Redwood Data {.tabset .tabset-pills .tabset-circle}
+
+#### All data
+
+```{r}
+redwood_all_orig
+skimr::skim(redwood_all_orig)
+```
+
+#### Network data
+
+```{r}
+redwood_net_orig
+skimr::skim(redwood_net_orig)
+```
+
+#### Log data
+
+```{r}
+redwood_log_orig
+skimr::skim(redwood_log_orig)
+```
+
+
+
+#### Explorations
+
+There are some NAs in the redwood data. Are they all from the same rows? Let's check.
+
+```{r}
+# check for NAs in redwood data
+num_nas_all <- sum(apply(redwood_all_orig, 1, function(x) any(is.na(x))))
+cat("Number of NAs in all data:", num_nas_all)
+num_nas_net <- sum(apply(redwood_net_orig, 1, function(x) any(is.na(x))))
+cat("Number of NAs in network data:", num_nas_net)
+num_nas_log <- sum(apply(redwood_log_orig, 1, function(x) any(is.na(x))))
+cat("Number of NAs in log data:", num_nas_log)
+```
+
+These numbers match what we saw in the skim, so let's remember to remove all rows with an NA in the cleaning step.
+
+Is the combined redwood dataset actually a combination of the network and log data? 
+
+```{r}
+cat("Number of rows in all redwood data:", nrow(redwood_all_orig))
+cat("Number of rows in redwood network data:", nrow(redwood_net_orig))
+cat("Number of rows in redwood log data:", nrow(redwood_log_orig))
+cat("Number of rows in redwood network + log data:", nrow(redwood_log_orig) + nrow(redwood_net_orig))
+```
+
+At least this passes a sanity check. More detailed exploration is needed to confirm further, but we will omit this for brevity.
+
+# Data Cleaning Explorations
+
+Let's look into the weird voltages...
+
+```{r}
+merged_voltage_df <- dplyr::left_join(
+  redwood_log_orig |> 
+    na.omit(),
+  redwood_net_orig |> 
+    na.omit(),
+  by = c("epoch", "nodeid")
+)
+
+plt <- merged_voltage_df |> 
+  dplyr::filter(
+    voltage.x >= 1
+  ) |> 
+  ggplot2::ggplot() +
+  ggplot2::aes(
+    x = voltage.x, y = voltage.y
+  ) +
+  ggplot2::geom_point()
+plt
+```
+
+
+Exploring weird temperature and humidity over time...
+
+```{r}
+plt_df <- dplyr::bind_rows(
+  redwood_log_orig |> 
+    na.omit() |> 
+    dplyr::mutate(
+      source = "log"
+    ),
+  redwood_net_orig |> 
+    na.omit() |> 
+    dplyr::mutate(
+      source = "network"
+    )
+)
+
+plt <- plt_df |> 
+  dplyr::filter(
+    humid_temp >= 0
+  ) |> 
+  ggplot2::ggplot() +
+  ggplot2::aes(
+    x = epoch, y = humid_temp, color = source
+  ) +
+  ggplot2::geom_point()
+plt
+
+plt <- plt_df |> 
+  dplyr::filter(
+    humidity >= 0
+  ) |> 
+  ggplot2::ggplot() +
+  ggplot2::aes(
+    x = epoch, y = humidity, color = source
+  ) +
+  ggplot2::geom_point()
+plt
+```
