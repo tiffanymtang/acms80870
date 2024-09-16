@@ -302,7 +302,7 @@ redwood_df <- redwood_df |>
 
 ```{r}
 plt <- redwood_long_df |> 
-  dplyr::filter(Tree == "interior")
+  dplyr::filter(Tree == "interior") |> 
   ggplot2::ggplot() +
   ggplot2::aes(
     x = datetime, 
