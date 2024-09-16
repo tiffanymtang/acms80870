@@ -172,7 +172,9 @@ redwood_df <- dplyr::bind_rows(
 
 ```{r}
 redwood_distinct <- redwood_df |>
-  # To fill in
+  dplyr::distinct(
+    epoch, nodeid, humidity, temp, iPAR, rPAR, .keep_all = TRUE
+  )
 print(
   sprintf(
     "Number of unique rows in merged log+network: %s (out of %s)",
@@ -184,7 +186,11 @@ print(
 Let's remove the duplicates.
 
 ```{r}
-# To fill in
+redwood_df <- redwood_df |>
+  dplyr::distinct(
+    epoch, nodeid, humidity, temp, iPAR, rPAR, .keep_all = TRUE
+  )
+redwood_df
 ```
 
 ### Merging with dates data
@@ -192,13 +198,15 @@ Let's remove the duplicates.
 Are all the epochs in redwood data found in the dates data?
 
 ```{r}
-# To fill in
+all(redwood_df$epoch %in% dates_df$number)
 ```
 
 Let's merge the redwood data with the dates data.
 
 ```{r}
-# To fill in
+redwood_df <- redwood_df |> 
+  dplyr::left_join(dates_df, by = c("epoch" = "number"))
+redwood_df
 ```
 
 ### Merging with mote location data
@@ -206,13 +214,42 @@ Let's merge the redwood data with the dates data.
 Are all the motes in the redwood data found in the mote location data?
 
 ```{r}
-# To fill in
+all(redwood_df$nodeid %in% motes_df$ID)
 ```
+
+There are three motes that have no location data.
+
+```{r}
+setdiff(unique(redwood_df$nodeid), unique(motes_df$ID))
+```
+
+```{r}
+redwood_df |> 
+  dplyr::filter(
+    nodeid %in% c(65535, 100, 135)
+  ) |> 
+  head()
+```
+
+```{r}
+redwood_df |> 
+  dplyr::filter(
+    nodeid %in% c(65535, 100, 135)
+  ) |> 
+  dplyr::group_by(nodeid) |> 
+  dplyr::summarise(
+    n = dplyr::n()
+  )
+```
+
+Not sure what's going on with these missing mote locations, but let's make a note of this and do the best we can for now.
 
 Let's merge in the mote location data.
 
 ```{r}
-# To fill in
+redwood_df <- redwood_df |> 
+  dplyr::left_join(motes_df, by = c("nodeid" = "ID"))
+redwood_df
 ```
 
 ### Exploring the data
@@ -222,6 +259,7 @@ redwood_df
 ```
 
 ```{r}
+# convert to long format for plotting purposes
 redwood_long_df <- redwood_df |> 
   tidyr::pivot_longer(
     cols = c(voltage, humidity, temp, iPAR, rPAR),
@@ -246,6 +284,25 @@ plt
 
 ```{r}
 plt <- redwood_long_df |> 
+  ggplot2::ggplot() +
+  ggplot2::aes(
+    x = datetime, 
+    y = value,
+    color = Tree
+  ) +
+  ggplot2::facet_grid(variable ~ ., scales = "free_y") +
+  ggplot2::geom_point()
+plt
+```
+
+```{r}
+redwood_df <- redwood_df |> 
+  dplyr::filter(Tree == "interior")
+```
+
+```{r}
+plt <- redwood_long_df |> 
+  dplyr::filter(Tree == "interior")
   ggplot2::ggplot() +
   ggplot2::aes(
     x = datetime, 
@@ -282,7 +339,28 @@ plt
 ```
 
 ```{r}
-# fix voltages
+lm_fit <- lm(voltage.y.inv ~ voltage.x, 
+             data = merged_voltage_df |> 
+               dplyr::mutate(
+                 voltage.y.inv = 1 / voltage.y
+               ))
+summary(lm_fit)
+
+redwood_df <- redwood_df |> 
+  dplyr::mutate(
+    voltage = dplyr::case_when(
+      source == "net" ~ 1 / (0.001683729 * voltage),
+      TRUE ~ voltage
+    )
+  )
+```
+
+```{r}
+plt <- redwood_df |> 
+  ggplot2::ggplot() +
+  ggplot2::aes(x = voltage, fill = source) +
+  ggplot2::geom_density(alpha = 0.2)
+plt
 ```
 
 #### What should we do about outliers/errors?
@@ -290,7 +368,7 @@ plt
 ```{r}
 plt <- plot_redwood_over_time(
   data = redwood_df,
-  color = "source"
+  color = "voltage"
 )
 plt
 ```
@@ -304,7 +382,7 @@ redwood_df <- redwood_df |>
   )
 ```
 
-One possible way to remove outliers...
+Since it looks like the outliers are somehow related to the voltage (maybe the battery is dying and the mote is sending erroneous values through the network), one possible way to remove outliers...
 
 ```{r}
 thrs <- seq(2.3, 2.5, by = 0.01)
@@ -361,10 +439,30 @@ redwood_df_cleaned <- redwood_df |>
 Is this a good outlier removal procedure?
 
 ```{r}
-# To fill in
+plt <- plot_redwood_over_time(
+  data = redwood_df,
+  color = "outlier"
+)
+plt
 ```
 
-Looks like we missed some outliers in our initial attempt.
+```{r}
+plt <- redwood_df |> 
+  dplyr::mutate(
+    nodeid = as.factor(nodeid)
+  ) |> 
+  plot_redwood_over_time(
+    color = "nodeid",
+    variables = "temp"
+  )
+plt
+```
+
+```{r}
+plotly::ggplotly(plt)
+```
+
+Looks like we missed some outliers in our initial attempt. We can do something similar for the other nodes that seem to have outliers.
 
 ```{r}
 # do same for nodes 141 and 145 but use epoch threshold directly since
@@ -420,7 +518,15 @@ redwood_df_cleaned <- redwood_df |>
 How did we do now?
 
 ```{r}
-# To fill in
+redwood_df_cleaned <- redwood_df_cleaned |> 
+  dplyr::filter(
+    temp > 0
+  )
+plt <- redwood_df_cleaned |> 
+  plot_redwood_over_time(
+    color = "nodeid"
+  )
+plt
 ```
 
 # Exploratory Data Analysis
