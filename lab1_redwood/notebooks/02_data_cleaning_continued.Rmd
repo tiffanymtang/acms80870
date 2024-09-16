@@ -1,0 +1,445 @@
+---
+title: "Lab 1 - Redwood Data"
+author: "Tiffany Tang"
+date: "`r Sys.Date()`"
+output: vthemes::vmodern
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE
+)
+
+for (fname in list.files(here::here("R"), pattern = "*.R")) {
+  source(here::here(file.path("R", fname)))
+}
+
+DATA_PATH <- here::here("data")
+```
+
+# Load Data {.tabset .tabset-vmodern}
+
+```{r load-data}
+# load dates data
+dates_orig <- load_dates_data(DATA_PATH)
+
+# load motes data
+motes_orig <- load_mote_location_data(DATA_PATH)
+
+# load redwood data
+redwood_all_orig <- load_redwood_data(DATA_PATH, source = "all")
+redwood_net_orig <- load_redwood_data(DATA_PATH, source = "net")
+redwood_log_orig <- load_redwood_data(DATA_PATH, source = "log")
+```
+
+## Quick Look {.tabset .tabset-pills .tabset-square}
+
+### Dates Data
+
+```{r}
+dates_orig
+skimr::skim(dates_orig)
+```
+
+### Motes Data
+
+```{r}
+motes_orig
+skimr::skim(motes_orig)
+```
+
+### Redwood Data {.tabset .tabset-pills .tabset-circle}
+
+#### All data
+
+```{r}
+redwood_all_orig
+skimr::skim(redwood_all_orig)
+```
+
+#### Network data
+
+```{r}
+redwood_net_orig
+skimr::skim(redwood_net_orig)
+```
+
+#### Log data
+
+```{r}
+redwood_log_orig
+skimr::skim(redwood_log_orig)
+```
+
+#### Explorations
+
+There are some NAs in the redwood data. Are they all from the same rows? Let's check.
+
+```{r}
+# check for NAs in redwood data
+num_nas_all <- sum(apply(redwood_all_orig, 1, function(x) any(is.na(x))))
+cat("Number of NA rows in all data:", num_nas_all)
+num_nas_net <- sum(apply(redwood_net_orig, 1, function(x) any(is.na(x))))
+cat("Number of NA rows in network data:", num_nas_net)
+num_nas_log <- sum(apply(redwood_log_orig, 1, function(x) any(is.na(x))))
+cat("Number of NA rows in log data:", num_nas_log)
+```
+
+These numbers match what we saw in the skim, so let's remember to remove all rows with an NA in the cleaning step.
+
+Is the combined redwood dataset actually a combination of the network and log data?
+
+```{r}
+cat("Number of rows in all redwood data:", nrow(redwood_all_orig))
+cat("Number of rows in redwood network data:", nrow(redwood_net_orig))
+cat("Number of rows in redwood log data:", nrow(redwood_log_orig))
+cat("Number of rows in redwood network + log data:", nrow(redwood_log_orig) + nrow(redwood_net_orig))
+```
+
+At least this passes a sanity check. More detailed exploration is needed to confirm further, but we will omit this for brevity.
+
+# Basic Data Cleaning {.tabset .tabset-vmodern}
+
+```{r clean-data}
+# load (partially) cleaned dates data
+dates_df <- clean_dates_data(dates_orig)
+
+# load (partially) cleaned motes data
+motes_df <- clean_mote_location_data(motes_orig)
+
+# load (partially) cleaned redwood data
+redwood_all_df <- clean_redwood_data(redwood_all_orig)
+redwood_net_df <- clean_redwood_data(redwood_net_orig)
+redwood_log_df <- clean_redwood_data(redwood_log_orig)
+```
+
+## Quick Look {.tabset .tabset-pills .tabset-square}
+
+### Dates Data
+
+```{r}
+dates_df
+skimr::skim(dates_df)
+```
+
+### Motes Data
+
+```{r}
+motes_df
+skimr::skim(motes_df)
+```
+
+### Redwood Data {.tabset .tabset-pills .tabset-circle}
+
+#### All data
+
+```{r}
+redwood_all_df
+skimr::skim(redwood_all_df)
+```
+
+#### Network data
+
+```{r}
+redwood_net_df
+skimr::skim(redwood_net_df)
+```
+
+#### Log data
+
+```{r}
+redwood_log_df
+skimr::skim(redwood_log_df)
+```
+
+# More Data Cleaning {.tabset .tabset-vmodern}
+
+Let's try to merge all of the relevant data (network/log data, mote locations, and time/dates data) into one nice **clean** data frame.
+
+```{r}
+# concatenate log and network data
+redwood_df <- dplyr::bind_rows(
+  redwood_log_df |>
+    dplyr::mutate(source = "log"),
+  redwood_net_df |>
+    dplyr::mutate(source = "net")
+)
+```
+
+### Are there duplicates in the data?
+
+```{r}
+redwood_distinct <- redwood_df |>
+  # To fill in
+print(
+  sprintf(
+    "Number of unique rows in merged log+network: %s (out of %s)",
+    nrow(redwood_distinct), nrow(redwood_df)
+  )
+)
+```
+
+Let's remove the duplicates.
+
+```{r}
+# To fill in
+```
+
+### Merging with dates data
+
+Are all the epochs in redwood data found in the dates data?
+
+```{r}
+# To fill in
+```
+
+Let's merge the redwood data with the dates data.
+
+```{r}
+# To fill in
+```
+
+### Merging with mote location data
+
+Are all the motes in the redwood data found in the mote location data?
+
+```{r}
+# To fill in
+```
+
+Let's merge in the mote location data.
+
+```{r}
+# To fill in
+```
+
+### Exploring the data
+
+```{r}
+redwood_df
+```
+
+```{r}
+redwood_long_df <- redwood_df |> 
+  tidyr::pivot_longer(
+    cols = c(voltage, humidity, temp, iPAR, rPAR),
+    names_to = "variable",
+    values_to = "value"
+  )
+redwood_long_df
+```
+
+```{r}
+plt <- redwood_long_df |> 
+  ggplot2::ggplot() +
+  ggplot2::aes(
+    x = datetime, y = value
+  ) +
+  ggplot2::facet_grid(variable ~ ., scales = "free_y") +
+  ggplot2::geom_point()
+plt
+```
+
+#### What should we do about the 2 trees?
+
+```{r}
+plt <- redwood_long_df |> 
+  ggplot2::ggplot() +
+  ggplot2::aes(
+    x = datetime, 
+    y = value,
+    color = Tree
+  ) +
+  ggplot2::facet_grid(variable ~ ., scales = "free_y") +
+  ggplot2::geom_point()
+plt
+```
+
+#### What should we do about voltages?
+
+```{r}
+merged_voltage_df <- dplyr::inner_join(
+  redwood_log_df,
+  redwood_net_df,
+  by = c("epoch", "nodeid")
+)
+
+plt <- merged_voltage_df |> 
+  dplyr::filter(
+    voltage.x >= 1
+  ) |>
+  ggplot2::ggplot() +
+  ggplot2::aes(
+    x = voltage.x, y = voltage.y
+  ) +
+  ggplot2::geom_point() +
+  ggplot2::labs(
+    x = "Log Voltage", y = "Network Voltage"
+  )
+plt
+```
+
+```{r}
+# fix voltages
+```
+
+#### What should we do about outliers/errors?
+
+```{r}
+plt <- plot_redwood_over_time(
+  data = redwood_df,
+  color = "source"
+)
+plt
+```
+
+Getting rid of the obvious errors
+
+```{r}
+redwood_df <- redwood_df |> 
+  dplyr::filter(
+    temp > 0
+  )
+```
+
+One possible way to remove outliers...
+
+```{r}
+thrs <- seq(2.3, 2.5, by = 0.01)
+nodes <- unique(redwood_df$nodeid)
+epoch_cutoffs <- list()
+for (node in nodes) {
+  for (thr in rev(thrs)) {
+    # find epoch where the node's voltage dips below threshold
+    epoch_cutoff <- redwood_df |> 
+      dplyr::filter(
+        nodeid == !!node,
+        voltage < thr
+      ) |> 
+      dplyr::slice_min(epoch, n = 1)
+    if (nrow(epoch_cutoff) == 0) {
+      # if voltage does not dip below threshold, do nothing
+      next
+    }
+    redwood_subset <- redwood_df |> 
+      dplyr::filter(
+        nodeid == !!node,
+        epoch >= epoch_cutoff$epoch[[1]],
+        epoch <= epoch_cutoff$epoch[[1]] + 100
+      ) |> 
+      dplyr::arrange(epoch)
+    autocor <- as.numeric(acf(redwood_subset$temp, plot = FALSE)[1]$acf)
+    if (autocor < 0.8) {
+      # if temperature measurements after identified epoch are not highly
+        # correlated, then assume node failure and remove data after epoch
+      epoch_cutoffs[[as.character(node)]] <- epoch_cutoff$epoch[[1]]
+      break
+    }
+  }
+}
+
+redwood_df <- redwood_df |> 
+  dplyr::mutate(
+    outlier = FALSE
+  )
+for (node in names(epoch_cutoffs)) {
+  redwood_df <- redwood_df |> 
+    dplyr::mutate(
+      outlier = dplyr::case_when(
+        (nodeid == !!node) & (epoch >= epoch_cutoffs[[node]]) ~ T,
+        TRUE ~ outlier
+      )
+    )
+}
+
+redwood_df_cleaned <- redwood_df |> 
+  dplyr::filter(!outlier)
+```
+
+Is this a good outlier removal procedure?
+
+```{r}
+# To fill in
+```
+
+Looks like we missed some outliers in our initial attempt.
+
+```{r}
+# do same for nodes 141 and 145 but use epoch threshold directly since
+# voltages are strange
+for (node in c(141, 145)) {
+  # get all possible epoch cutoffs
+  thrs <- redwood_df |> 
+    dplyr::filter(
+      nodeid == !!node,
+      source == "net"
+    ) |> 
+    dplyr::arrange(epoch) |> 
+    dplyr::pull(epoch) |> 
+    unique()
+  for (thr in thrs) {
+    redwood_subset <- redwood_df |> 
+      dplyr::filter(
+        nodeid == !!node,
+        epoch >= !!thr,
+        epoch <= !!thr + 100
+      ) |> 
+      dplyr::arrange(epoch)
+    autocor <- as.numeric(acf(redwood_subset$temp, plot = FALSE)[1]$acf)
+    if (autocor < 0.8) {
+      # if temperature measurements after identified epoch are not highly
+      # correlated, then assume node failure and remove data after epoch
+      epoch_cutoffs[[as.character(node)]] <- thr
+      break
+    }
+  }
+}
+
+redwood_df <- redwood_df |> 
+  dplyr::mutate(
+    outlier = FALSE
+  )
+for (node in names(epoch_cutoffs)) {
+  # mark outliers
+  redwood_df <- redwood_df |> 
+    dplyr::mutate(
+      outlier = dplyr::case_when(
+        (nodeid == !!node) & (epoch >= epoch_cutoffs[[node]]) ~ T,
+        TRUE ~ outlier
+      )
+    )
+}
+
+# remove outliers
+redwood_df_cleaned <- redwood_df |> 
+  dplyr::filter(!outlier)
+```
+
+How did we do now?
+
+```{r}
+# To fill in
+```
+
+# Exploratory Data Analysis
+
+```{r clean-data-continued}
+# wrap all cleaning steps into streamlined functions and do merge/cleaning here
+redwood_df <- merge_redwood_data(
+  dates_data = dates_df,
+  motes_data = motes_df,
+  redwood_net_data = redwood_net_df,
+  redwood_log_data = redwood_log_df
+) |> 
+  remove_redwood_outliers()
+```
+
+What questions can we/do we want to answer with this data?
+
+-   
+
+```{r}
+
+```
