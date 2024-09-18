@@ -49,13 +49,54 @@ redwood_df <- merge_redwood_data(
 ```
 
 ```{r}
-
+redwood_df
 ```
 
 What questions can we/do we want to answer with this data?
 
--   
+-   What is the pairwise relationship between variables (temp, humidity, iPAR, rPAR)?
+
+-   Are there differences between the network and the log data?
+
+-   What's the disparity in temperature between the top versus bottom tree?
+
+-   How quickly does the top of the tree warm up?
+
+-   What are the differences in the tree sensor values for different times of day
+
+**What are the pairwise relationships between variables (temp, humidity, iPAR, rPAR)?**
 
 ```{r}
-
+plt_df <- redwood_df |> 
+  dplyr::slice_sample(n = 50000)
+plt <- plt_df |> 
+  vdocs::plot_pairs(
+    columns = c('temp', "humidity", "iPAR", "rPAR"),
+    point_size = 0.1,
+    color = plt_df$Height
+  )
+plt
 ```
+
+**What's the disparity in temperature between the top versus the bottom of the tree?**
+
+```{r}
+plt_df <- redwood_df |> 
+  dplyr::group_by(
+    Height, time
+  ) |> 
+  dplyr::summarise(
+    mean_temp = mean(temp)
+  ) |> 
+  dplyr::arrange(Height)
+plt <- plt_df |> 
+  tidyr::pivot_wider(
+    id_cols = Height,
+    names_from = time,
+    values_from = mean_temp
+  ) |> 
+  tibble::column_to_rownames("Height") |> 
+  vdocs::plot_heatmap()
+plt
+```
+
