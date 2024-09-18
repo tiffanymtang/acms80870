@@ -162,7 +162,7 @@ remove_redwood_outliers <- function(redwood_data) {
       dplyr::pull(epoch) |>
       unique()
     for (thr in thrs) {
-      redwood_subset <- redwood_df |>
+      redwood_subset <- redwood_data |>
         dplyr::filter(
           nodeid == !!node,
           epoch >= !!thr,

@@ -1,0 +1,61 @@
+---
+title: "Lab 1 - Redwood Data"
+author: "Tiffany Tang"
+date: "`r Sys.Date()`"
+output: vthemes::vmodern
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE
+)
+
+for (fname in list.files(here::here("R"), pattern = "*.R")) {
+  source(here::here(file.path("R", fname)))
+}
+
+DATA_PATH <- here::here("data")
+```
+
+# Exploratory Data Analysis {.tabset .tabset-vmodern}
+
+```{r load-data}
+# load dates data
+dates_df <- load_dates_data(DATA_PATH) |> 
+  clean_dates_data()
+
+# load motes data
+motes_df <- load_mote_location_data(DATA_PATH) |> 
+  clean_mote_location_data()
+
+# load redwood data
+redwood_all_df <- load_redwood_data(DATA_PATH, source = "all") |> 
+  clean_redwood_data()
+redwood_net_df <- load_redwood_data(DATA_PATH, source = "net") |> 
+  clean_redwood_data()
+redwood_log_df <- load_redwood_data(DATA_PATH, source = "log") |> 
+  clean_redwood_data()
+
+# wrap all cleaning steps into streamlined functions and do merge/cleaning here
+redwood_df <- merge_redwood_data(
+  dates_data = dates_df,
+  motes_data = motes_df,
+  redwood_net_data = redwood_net_df,
+  redwood_log_data = redwood_log_df
+) |> 
+  remove_redwood_outliers()
+```
+
+```{r}
+
+```
+
+What questions can we/do we want to answer with this data?
+
+-   
+
+```{r}
+
+```
