@@ -22,14 +22,18 @@ jobs:
 
       - name: Install package
         run: poetry install
+        working-directory: dsiplibpy
 
       - name: Test with pytest
-        run: poetry run pytest tests/ --cov=dsiplibpy --cov-report=xml
-
-      - name: Use Codecov to track coverage
-        uses: codecov/codecov-action@v3
-        with:
-          files: ./coverage.xml # coverage report
+        run: poetry run pytest tests/
+        working-directory: dsiplibpy
 
       - name: Build documentation
         run: poetry run make html --directory docs/
+        working-directory: dsiplibpy
+
+      - name: Deploy
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dsiplibpy/docs/_build/html
