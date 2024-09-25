@@ -13,7 +13,7 @@
 theme_custom <- function() {
   ggplot2::theme_minimal() +
     ggplot2::theme(
-      text = ggplot2::element_text(family = "Arial", size = 12),
+      text = ggplot2::element_text(size = 12),
       panel.grid.minor = ggplot2::element_blank(),
       panel.grid.major = ggplot2::element_blank(),
       panel.background = ggplot2::element_blank(),
