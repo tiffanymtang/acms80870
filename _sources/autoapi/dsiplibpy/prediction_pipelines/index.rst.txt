@@ -1,0 +1,69 @@
+dsiplibpy.prediction_pipelines
+==============================
+
+.. py:module:: dsiplibpy.prediction_pipelines
+
+
+Functions
+---------
+
+.. autoapisummary::
+
+   dsiplibpy.prediction_pipelines.run_binary_classification_pipeline
+
+
+Module Contents
+---------------
+
+.. py:function:: run_binary_classification_pipeline(X_train, y_train, X_test, y_test, models, cv_params, nfolds=5, metrics='auto')
+
+   Run a binary classification pipeline for a set of models and hyperparameters.
+
+   :param X_train: Training features.
+   :type X_train: array-like
+   :param y_train: Training labels.
+   :type y_train: array-like
+   :param X_test: Test features.
+   :type X_test: array-like
+   :param y_test: Test labels.
+   :type y_test: array-like
+   :param models: Dictionary of model objects.
+   :type models: dict
+   :param cv_params: Dictionary of hyperparameters to search over for each model.
+   :type cv_params: dict
+   :param nfolds: Number of cross-validation folds.
+   :type nfolds: int
+   :param metrics: Dictionary of metrics to evaluate the models. If "auto", default metrics
+                   are used.
+   :type metrics: dict or str
+
+   :returns: * **errs** (*dict*) -- Dictionary of evaluation metrics for each model.
+             * **preds** (*dict*) -- Dictionary of predictions for each model.
+             * **prob_preds** (*dict*) -- Dictionary of predicted probabilities for each model.
+             * **tuned_pipelines** (*dict*) -- Dictionary of tuned pipelines.
+
+   .. rubric:: Examples
+
+   >>> from sklearn.datasets import make_classification
+   >>> from sklearn.model_selection import train_test_split
+   >>> from sklearn.ensemble import RandomForestClassifier
+   >>> from sklearn.linear_model import LogisticRegression
+   >>> from sklearn.svm import SVC
+   >>> from dsiplibpy import run_binary_classification_pipeline
+   >>> X, y = make_classification(n_samples=100, n_features=20, n_informative=5, random_state=0)
+   >>> X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=0)
+   >>> models = {
+   ...     "rf": RandomForestClassifier(),
+   ...     "lr": LogisticRegression(),
+   ...     "svc": SVC()
+   ... }
+   >>> cv_params = {
+   ...     "rf__n_estimators": [10, 50, 100],
+   ...     "lr__C": [0.1, 1.0, 10.0],
+   ...     "svc__C": [0.1, 1.0, 10.0]
+   ... }
+   >>> errs, preds, prob_preds, tuned_pipelines = run_binary_classification_pipeline(
+   ...     X_train, y_train, X_test, y_test, models, cv_params, nfolds=5, metrics="auto"
+   ... )
+
+

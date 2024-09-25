@@ -1,0 +1,29 @@
+dsiplibpy
+=========
+
+.. py:module:: dsiplibpy
+
+
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 1
+
+   /autoapi/dsiplibpy/dsiplibpy/index
+   /autoapi/dsiplibpy/prediction_pipelines/index
+
+
+Attributes
+----------
+
+.. autoapisummary::
+
+   dsiplibpy.__version__
+
+
+Package Contents
+----------------
+
+.. py:data:: __version__
+

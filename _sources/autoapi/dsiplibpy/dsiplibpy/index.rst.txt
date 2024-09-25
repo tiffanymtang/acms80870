@@ -1,0 +1,6 @@
+dsiplibpy.dsiplibpy
+===================
+
+.. py:module:: dsiplibpy.dsiplibpy
+
+
