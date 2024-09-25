@@ -5,3 +5,11 @@
 .DS_Store
 
 *.Rproj
+
+lab1_redwood/notebooks/01_data_cleaning_full.Rmd
+
+lab1_redwood/notebooks/01_data_cleaning.html
+
+lab1_redwood/notebooks/02_data_cleaning_continued_blank.Rmd
+
+lab1_redwood/notebooks/02_data_cleaning_continued.Rmd
