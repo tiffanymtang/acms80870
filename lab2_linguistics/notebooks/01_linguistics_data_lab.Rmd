@@ -12,9 +12,9 @@ knitr::opts_chunk$set(
   message = FALSE
 )
 
-for (fname in list.files(here::here("R"), pattern = "*.R")) {
-  source(here::here(file.path("R", fname)))
-}
+source(here::here("R", "load.R"))
+source(here::here("R", "clean.R"))
+source(here::here("R", "plot.R"))
 
 DATA_PATH <- here::here("data")
 ```
