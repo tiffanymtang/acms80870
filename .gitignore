@@ -15,3 +15,5 @@ lab1_redwood/notebooks/02_data_cleaning_continued_blank.Rmd
 lab1_redwood/notebooks/02_data_cleaning_continued.Rmd
 
 lab2_linguistics/data/
+
+*/*/__pycache__/*
