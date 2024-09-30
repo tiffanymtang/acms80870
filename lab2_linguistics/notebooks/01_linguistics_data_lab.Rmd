@@ -1,0 +1,121 @@
+---
+title: "Lab 2 - Linguistics Data"
+author: "Tiffany Tang"
+date: "`r Sys.Date()`"
+output: vthemes::vmodern
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE
+)
+
+for (fname in list.files(here::here("R"), pattern = "*.R")) {
+  source(here::here(file.path("R", fname)))
+}
+
+DATA_PATH <- here::here("data")
+```
+
+# Load Data {.tabset .tabset-vmodern}
+
+Let's first load in the three datasets:
+
+- `qa_key`: question and answer key
+- `ling_orig`: (uncleaned) linguistics survey data
+- `zip_df`: mapping between ZIP codes and latitude/longitude coordinates
+
+**Your task:**
+
+- Open `R/load.R` and fill in the code for `load_ling_data()`.
+
+```{r load-data}
+# load in data
+qa_key <- load_q_and_a_key(DATA_PATH)
+ling_orig <- load_ling_data(DATA_PATH)
+zip_df <- load_zip_data(DATA_PATH)
+```
+
+## Quick Look {.tabset .tabset-pills .tabset-square}
+
+Next, taking a quick look at the data...
+
+### Q and A Data
+
+```{r}
+skimr::skim(qa_key)
+```
+
+### Linguistics Data
+
+```{r}
+skimr::skim(ling_orig)
+```
+
+### ZIP Data
+
+```{r}
+skimr::skim(zip_df)
+```
+
+# Clean Data {.tabset .tabset-vmodern}
+
+In order to facilitate visualizations and future analyses, we will next merge the linguistics survey data with the ZIP locations data and clean the data.
+
+**Your task:**
+
+- Open `R/clean.R` and fill in the code for `merge_ling_zip_data()`. This function should merge the linguistics survey data with the ZIP locations data. The goal is to relate each individual to their latitude/longitude location coordinates.
+
+```{r}
+# merge linguistics survey data with ZIP locations
+ling_df <- merge_ling_zip_data(ling_orig, zip_df)
+skimr::skim(ling_df)
+```
+
+**Your task:**
+
+- Open `R/clean.R` and fill in the code for `clean_ling_data()`. Feel free to do any data cleaning you would like here.
+
+```{r}
+# do data cleaning (if necessary)
+ling_df <- clean_ling_data(ling_df)
+skimr::skim(ling_df)
+```
+
+# Data Explorations {.tabset .tabset-vmodern}
+
+Let's do some exploratory data analysis!
+
+To get you started, here is a map of the survey respondents and their responses to question 50.
+
+```{r}
+plt <- plot_ling_map(ling_df, qa_key, qid = 50)
+plotly::ggplotly(plt)
+```
+
+**Your task:**
+
+- Spend some time exploring other questions and visualizations of the data. The goal is to get a feel for what the data is like and what kind of dimension reduction/clustering analyses you might want to do in the future.
+
+```{r}
+# TODO: additional explorations
+```
+
+
+# Dimension Reduction {.tabset .tabset-vmodern}
+
+Time to begin dimension reduction.
+
+## Principal Components Analysis {.tabset .tabset-pills .tabset-square}
+
+Let's start with arguably the most popular dimension reduction technique - principal components analysis (PCA).
+
+**Your task:**
+
+- Perform PCA on the linguistics survey data. (Tip: you may want to use the `prcomp()` function from the `stats` package.)
+
+```{r}
+# do PCA
+```
