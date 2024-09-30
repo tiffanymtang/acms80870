@@ -80,8 +80,8 @@ skimr::skim(ling_df)
 
 ```{r}
 # do data cleaning (if necessary)
-ling_df <- clean_ling_data(ling_df)
-skimr::skim(ling_df)
+ling_df_cleaned <- clean_ling_data(ling_df)
+skimr::skim(ling_df_cleaned)
 ```
 
 # Data Explorations {.tabset .tabset-vmodern}
