@@ -75,6 +75,12 @@ ling_df <- merge_ling_zip_data(ling_orig, zip_df)
 skimr::skim(ling_df)
 ```
 
+```{r}
+ling_df |>
+  dplyr::filter(is.na(ZIP_lat) | is.na(ZIP_long)) |>
+  dplyr::distinct(ZIP, CITY, STATE)
+```
+
 **Your task:**
 
 -   Open `R/clean.R` and fill in the code for `clean_ling_data()`. Feel free to do any data cleaning you would like here.
@@ -92,8 +98,8 @@ Let's do some exploratory data analysis!
 To get you started, here is a map of the survey respondents and their responses to question 50.
 
 ```{r}
-plt <- plot_ling_map(ling_df, qa_key, qid = 80)
-plotly::ggplotly(plt)
+plt <- plot_ling_map(ling_df, qa_key, qid = 50)
+plt
 ```
 
 Let's also look at several different questions side-by-side:
@@ -159,14 +165,84 @@ Time to begin dimension reduction.
 
 Let's start with arguably the most popular dimension reduction technique - principal components analysis (PCA) using `prcomp()`.
 
+If we apply PCA without too much thought on our dataset:
+
 ```{r}
 # do PCA
 X <- get_X_matrix(ling_df)
 pca_out <- prcomp(X)
 pca_plt1 <- plot_pca(
-  pca_out, npcs = 2
+  pca_out, npcs = 2, color = get_answers(ling_df$Q059, qid = 59, qa_key)
 )
 pca_plt1
+```
+
+The first PC corresponds to Q59. Why? Because this question has the most number of choices, so it's encoding ranges from 0-21.
+
+Let's try normalizing the X so that all the questions are on the same scale:
+
+```{r}
+pca_out <- prcomp(X, scale = TRUE)
+pca_plt2 <- plot_pca(
+  pca_out, npcs = 2, color = get_answers(ling_df$Q059, qid = 59, qa_key)
+)
+pca_plt2
+```
+
+But this still doesn't show much of a pattern with the geography of the US, which we would expect from our EDA.
+
+```{r}
+plt <- plot_dr_map(pca_out$x, ling_df)
+plt
+```
+
+The issue is encoding the categorical variables directly to a number. We instead should be one-hot encoding these categorical responses.
+
+```{r}
+X <- one_hot_ling_data(ling_df)
+pca_out <- prcomp(X)
+pca_plt3 <- plot_pca(
+  pca_out, npcs = 2, color = get_answers(ling_df$Q059, qid = 59, qa_key)
+)
+pca_plt3
+
+```
+
+But now, the PCA plot essentially is showing us the variation between people who responded and those who did not respond to the questions.
+
+```{r}
+num_nas <- rowSums(get_X_matrix(ling_df) == 0)
+hist(num_nas)
+
+pca_plt4 <- plot_pca(
+  pca_out, npcs = 2, color = num_nas
+)
+pca_plt4
+```
+
+Let's remove people who left too many questions unanswered and do PCA.
+
+```{r}
+ling_df_cleaned <- remove_samples(ling_df, min_answers = 50)
+X <- one_hot_ling_data(ling_df_cleaned)
+pca_out <- prcomp(X)
+pca_plt5 <- plot_pca(
+  pca_out, npcs = 2
+)
+pca_plt5
+```
+
+```{r}
+plt <- plot_dr_map(pca_out$x, ling_df_cleaned)
+plt
+```
+
+The first two PCs now show some association with geographical regions in the US.
+
+We can also check out the PC loadings to find the features that are driving the top PCs
+
+```{r}
+as.data.frame(abs(pca_out$rotation))
 ```
 
 ## tSNE {.tabset .tabset-pills .tabset-square}
