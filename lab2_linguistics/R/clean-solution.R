@@ -118,24 +118,34 @@ collapse_survey_responses <- function(ling_data, qa_key, min_prop = 0.05) {
 #'
 #' @param ling_data the linguistics data
 #'
-#' @returns A data frame with aggregated survey responses by county
+#' @returns A data frame with one row per county and each column is a question.
+#'   The (i, j) value in this data frame is the most popular response to
+#'   question j in county i.
 aggregate_survey_response_by_county <- function(ling_data) {
+  is_onehot <- all(
+    as.matrix(ling_data |> dplyr::select(tidyselect::starts_with("Q"))) %in% c(0, 1)
+  )
+  if (!isTRUE(is_onehot)) {
+    stop(
+      "Input data must be one-hot encoded to aggregate by county. ",
+      "Run one_hot_ling_data(ling_data, return_matrix = FALSE) first."
+    )
+  }
+  if (!("ZIP_county" %in% names(ling_data)) ||
+      !("ZIP_state" %in% names(ling_data))) {
+    stop(
+      "Input data must have ZIP_county and ZIP_state columns.",
+      "Try running one_hot_ling_data(ling_data, return_matrix = FALSE) first."
+    )
+  }
   ling_data_by_county <- ling_data |>
     # aggregate response by county
     dplyr::group_by(ZIP_county, ZIP_state) |>
     dplyr::summarise(
-      dplyr::across(
-        tidyselect::starts_with("Q"),
-        function(x) {
-          if (all(x == 0)) {
-            return(0)
-          } else {
-            which.max(table(x[x != 0]))[1]
-          }
-        }
-      ),
+      dplyr::across(tidyselect::starts_with("Q"), mean),
       ZIP_lat = mean(ZIP_lat),
       ZIP_long = mean(ZIP_long),
+      ZIP_state_abb = dplyr::first(ZIP_state_abb),
       .groups = "drop"
     )
   return(ling_data_by_county)

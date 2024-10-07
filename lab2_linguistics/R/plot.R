@@ -299,6 +299,7 @@ plot_dr_map <- function(X, ling_data, ndim = 2,
   # get state/county boundaries data
   map_type <- ifelse(by_county ,"county", "state")
   map_df <- ggplot2::map_data(map_type)
+  state_map_df <- ggplot2::map_data("state")
 
   # get the data to plot
   X_df <- as.data.frame(X)
@@ -356,13 +357,16 @@ plot_dr_map <- function(X, ling_data, ndim = 2,
         ggplot2::ggplot() +
         ggplot2::geom_polygon(
           ggplot2::aes(
-            x = long, y = lat, group = group, fill = .data[[colnames(X_df)[i]]]
+            x = long, y = lat, group = group,
+            fill = .data[[colnames(X_df)[i]]],
+            color = .data[[colnames(X_df)[i]]]
           ),
-          data = plt_df, color = "black", linewidth = linewidth
+          data = plt_df, linewidth = linewidth
         ) +
         ggplot2::geom_polygon(
           ggplot2::aes(x = long, y = lat, group = group),
-          data = map_df, color = "black", linewidth = linewidth, fill = NA
+          data = state_map_df,
+          color = "black", linewidth = linewidth * 2, fill = NA
         )
     } else {
       plt_ls[[i]] <- plt_df |>
@@ -381,7 +385,7 @@ plot_dr_map <- function(X, ling_data, ndim = 2,
     plt_ls[[i]] <- plt_ls[[i]] +
       ggplot2::labs(
         title = sprintf("Component %s", i),
-        color = "Value"
+        color = "Value", fill = "Value"
       ) +
       ggplot2::theme(
         axis.title = ggplot2::element_blank(),
