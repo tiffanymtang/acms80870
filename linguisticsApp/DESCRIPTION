@@ -1,0 +1,35 @@
+Package: linguisticsApp
+Title: What the Package Does (One Line, Title Case)
+Version: 0.0.0.9000
+Authors@R: 
+    person("First", "Last", , "first.last@example.com", role = c("aut", "cre"),
+           comment = c(ORCID = "YOUR-ORCID-ID"))
+Description: What the package does (one paragraph).
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
+Imports: 
+    bslib,
+    caret,
+    dplyr,
+    ggplot2,
+    here,
+    maps,
+    patchwork,
+    Rtsne,
+    shiny,
+    shinydashboard,
+    shinyWrappers (>= 0.0.0.9000),
+    stringr,
+    tidyselect,
+    umap,
+    vdocs (>= 0.0.0.9000),
+    vthemes (>= 0.1.0)
+Remotes: 
+    Yu-Group/vthemes,
+    Yu-Group/vdocs,
+    tiffanymtang/shinyWrappers
+Depends: 
+    R (>= 2.10)
+LazyData: true
