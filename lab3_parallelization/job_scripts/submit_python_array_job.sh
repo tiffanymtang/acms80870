@@ -5,7 +5,7 @@
 #$ -pe smp 24        # Specify parallel environment and legal core size
 #$ -q long           # Specify queue
 #$ -N job_name       # Specify job name
-#$ -t 1-2            # Specify array job
+#$ -t 0-1            # Specify array job
 
 export OMP_NUM_THREADS=${NSLOTS}
 module load python
