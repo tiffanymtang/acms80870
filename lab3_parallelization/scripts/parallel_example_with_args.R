@@ -1,4 +1,4 @@
-# to submit job: qsub -N parallel_example_with_args submit_r_array_job.sh ../scripts/parallel_example_with_args
+# to submit job: qsub -N parallel_example_with_args submit_r_array_job.sh scripts/parallel_example_with_args
 library(future)
 library(furrr)
 library(optparse)

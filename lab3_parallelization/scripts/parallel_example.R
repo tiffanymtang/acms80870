@@ -1,4 +1,4 @@
-# to submit job: qsub -N parallel_example submit_r_job.sh ../scripts/parallel_example
+# to submit job: qsub -N parallel_example submit_r_job.sh scripts/parallel_example
 library(future)
 library(furrr)
 
