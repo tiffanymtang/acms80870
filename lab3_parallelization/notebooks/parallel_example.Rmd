@@ -88,18 +88,19 @@ Now, to parallelize this code, there are two steps:
 set.seed(242)
 
 # set up parallel backend
-n_workers <- 2
+n_workers <- 5
 plan(multisession, workers = n_workers)
 
 start_time <- Sys.time()
 futures <- list()
-for (i in 1:2) {
-# for (i in 1:30) {
+# for (i in 1:5) {
+for (i in 1:30) {
+  # pred <- fit_rf_loo(i, X, y)
   futures[[i]] <- future({
     fit_rf_loo(i, X, y)
-  })
-  # checking whether the future we created has been resolved or unresolved
-  print(resolved(futures))
+  }, seed = TRUE)
+  # # checking whether the future we created has been resolved or unresolved
+  # print(resolved(futures))
 }
 print(paste("Intermediary Time Checkpoint:", Sys.time() - start_time))
 preds_future <- lapply(futures, value)
@@ -123,8 +124,8 @@ preds_furrr <- furrr::future_map(
   1:n,
   function(i) {
     fit_rf_loo(i, X, y)
-  }#,
-  # .options = furrr::furrr_options(seed = TRUE)
+  },
+  .options = furrr::furrr_options(seed = TRUE)
 )
 end_time <- Sys.time()
 execution_time <- end_time - start_time
