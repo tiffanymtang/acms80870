@@ -1,0 +1,535 @@
+---
+title: "Supervised Learning with Clouds Data"
+author: "Tiffany Tang"
+date: "`r Sys.Date()`"
+output: 
+  vthemes::vmodern:
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE
+)
+
+source(here::here("R", "load.R"))
+source(here::here("R", "clean.R"))
+source(here::here("R", "plot.R"))
+
+subchunk_idx <- 1
+set.seed(242)
+
+cloud_colors <- c("dark green", "light blue", "black")
+```
+
+# Load and clean data {.tabset .tabset-vmodern}
+
+```{r}
+cloud_data_orig <- load_cloud_data()
+cloud_data_ls <- clean_cloud_data(cloud_data_orig)
+cloud_data <- dplyr::bind_rows(cloud_data_ls, .id = "image")
+```
+
+# Exploratory Data Analysis {.tabset .tabset-vmodern}
+
+## Raw Images {.tabset .tabset-pills .tabset-square}
+
+```{r results = "asis"}
+raw_features <- c("DF", "CF", "BF", "AF", "AN")
+for (var in c("label", raw_features)) {
+  cat(sprintf("\n\n### %s\n\n", var))
+  plt <- plot_cloud_data(cloud_data, var)
+  vthemes::subchunkify(
+    plt, i = subchunk_idx, fig_width = 10, fig_height = 4
+  )
+  subchunk_idx <- subchunk_idx + 1
+}
+```
+
+## Correlations {.tabset .tabset-pills .tabset-square}
+
+```{r results = "asis"}
+for (image_id in unique(cloud_data$image)) {
+  plt_df <- cloud_data |> 
+    dplyr::filter(image == !!image_id)
+  plt <- plot_pairs(
+    plt_df, columns = c("DF", "CF", "BF", "AF", "AN"), 
+    point_size = 0.1, subsample = 0.5, color = plt_df$label
+  ) +
+    ggplot2::scale_color_manual(values = cloud_colors) +
+    ggplot2::scale_fill_manual(values = cloud_colors) +
+    ggplot2::labs(title = sprintf("Image %s", image_id))
+  vthemes::subchunkify(
+    plt, i = subchunk_idx, fig_width = 10, fig_height = 10
+  )
+  subchunk_idx <- subchunk_idx + 1
+}
+```
+
+## Feature Engineering {.tabset .tabset-pills .tabset-square}
+
+```{r results = "asis"}
+engineered_features <- c("NDAI", "SD", "CORR")
+for (var in c("label", engineered_features)) {
+  cat(sprintf("\n\n### %s\n\n", var))
+  plt <- plot_cloud_data(cloud_data, var)
+  vthemes::subchunkify(
+    plt, i = subchunk_idx, fig_width = 10, fig_height = 4
+  )
+  subchunk_idx <- subchunk_idx + 1
+}
+```
+
+# Prediction Modeling {.tabset .tabset-vmodern}
+
+```{r}
+# save one image for testing
+test_image_idx <- sample(unique(cloud_data$image), 1)
+train_data_all <- cloud_data |>
+  dplyr::filter(!(image %in% test_image_idx))
+test_data_all <- cloud_data |>
+  dplyr::filter(image %in% test_image_idx)
+print(sprintf("Test image: %s", test_image_idx))
+```
+
+## Data Splitting using Random Sampling
+
+<div class="panel panel-default padded-panel">
+First, let's investigate what happens if we ignored the image structure and randomly sampled points into training and test sets. We will see that the estimated test accuracy (here, using logistic regression) is significantly higher than the observed test accuracy. In other words, we have overfitted to the training data. This holds true if we had used other prediction models, too.
+</div>
+
+```{r}
+# randomly sample points into training and test sets
+nfolds <- 8
+cv_foldids <- sample(1:nfolds, nrow(train_data_all), replace = TRUE)
+
+# vector of predictor covariates
+keep_vars <- c("DF", "CF", "BF", "AF", "AN", "binary_label")
+
+# estimate test error for logistic regression
+valid_auroc_ls <- list()
+valid_preds_ls <- list()
+for (fold in 1:nfolds) {
+  # do data split
+  cv_train_data_all <- train_data_all[cv_foldids != fold, ]
+  cv_train_data <- cv_train_data_all |> 
+    dplyr::select(tidyselect::all_of(keep_vars))
+  cv_valid_data_all <- train_data_all[cv_foldids == fold, ]
+  cv_valid_data <- cv_valid_data_all |> 
+    dplyr::select(tidyselect::all_of(keep_vars))
+  
+  # fit and evaluate logistic regression
+  fit <- glm(binary_label ~ ., data = cv_train_data, family = "binomial")
+  valid_preds <- predict(fit, cv_valid_data, type = "response")
+  log_auroc <- yardstick::roc_auc_vec(
+    truth = cv_valid_data$binary_label, 
+    estimate = valid_preds, 
+    event_level = "second"
+  )
+  
+  # save fold results for future investigation
+  valid_preds_ls[[fold]] <- cv_valid_data_all |> 
+    dplyr::mutate(
+      yhat = valid_preds
+    )
+  valid_auroc_ls[[fold]] <- tibble::tibble(
+    logistic = log_auroc
+  )
+}
+
+# examine validation accuracy
+valid_auroc_df <- dplyr::bind_rows(valid_auroc_ls, .id = "fold")
+mean_valid_auroc_df <- valid_auroc_df |> 
+  dplyr::summarise(dplyr::across(-fold, ~ mean(.x, na.rm = TRUE)))
+
+# test error for logistic regression
+train_data <- train_data_all |> 
+  dplyr::select(tidyselect::all_of(keep_vars))
+test_data <- test_data_all |>
+  dplyr::select(tidyselect::all_of(keep_vars))
+fit <- glm(binary_label ~ ., data = train_data, family = "binomial")
+test_preds <- predict(fit, test_data, type = "response")
+test_auroc <- yardstick::roc_auc_vec(
+  truth = test_data$binary_label, 
+  estimate = test_preds, 
+  event_level = "second"
+)
+
+tibble::tibble(
+  `Estimated Test AUROC` = mean_valid_auroc_df$logistic,
+  `Observed Test AUROC` = test_auroc
+)
+```
+
+## Data Splitting (Clustered Sampling) {.tabset .tabset-pills .tabset-square}
+
+<div class="panel panel-default padded-panel">
+To obtain a more accurate estimate of the test error, we can perform clustered sampling, where we partition the images into contiguous blocks when doing the data splitting. This better mimics the process of how we obtain our future data (that is, obtaining completely new images).
+</div>
+
+### Image Blocks
+
+<div class="panel panel-default padded-panel">
+Below, we show the image blocks used in the data splitting scheme.
+</div>
+
+```{r}
+# divide image into contiguous chunks
+cloud_data <- add_cloud_blocks(cloud_data_ls)
+plt <- plot_cloud_data(cloud_data, var = "block_id")
+plt
+```
+
+### Logistic Regression
+
+<div class="panel panel-default padded-panel">
+By performing the data splitting scheme using clustered sampling, the estimated validation accuracy from logistic regression is now closer to the observed test error. This is because we are now training and evaluating our model on data that is more representative of the future data we will encounter.
+</div>
+
+```{r}
+train_data_all <- cloud_data |>
+  dplyr::filter(!(image %in% test_image_idx))
+test_data_all <- cloud_data |>
+  dplyr::filter(image %in% test_image_idx)
+
+# estimate test error for logistic regression
+valid_auroc_ls <- list()
+valid_preds_ls <- list()
+for (fold in unique(train_data_all$block_id)) {
+  # do data split
+  cv_train_data_all <- train_data_all |> 
+    dplyr::filter(block_id != !!fold)
+  cv_train_data <- cv_train_data_all |> 
+    dplyr::select(tidyselect::all_of(keep_vars))
+  cv_valid_data_all <- train_data_all |> 
+    dplyr::filter(block_id == !!fold)
+  cv_valid_data <- cv_valid_data_all |> 
+    dplyr::select(tidyselect::all_of(keep_vars))
+  
+  # fit and evaluate logistic regression
+  fit <- glm(binary_label ~ ., data = cv_train_data, family = "binomial")
+  valid_preds <- predict(fit, cv_valid_data, type = "response")
+  log_auroc <- yardstick::roc_auc_vec(
+    truth = cv_valid_data$binary_label, 
+    estimate = valid_preds, 
+    event_level = "second"
+  )
+  
+  # save fold results for future investigation
+  valid_preds_ls[[fold]] <- cv_valid_data_all |> 
+    dplyr::mutate(
+      yhat = valid_preds
+    )
+  valid_auroc_ls[[fold]] <- tibble::tibble(
+    logistic = log_auroc
+  )
+}
+
+# examine validation accuracy
+valid_auroc_df <- dplyr::bind_rows(valid_auroc_ls, .id = "fold")
+mean_valid_auroc_df <- valid_auroc_df |> 
+  dplyr::summarise(dplyr::across(-fold, ~ mean(.x, na.rm = TRUE)))
+
+tibble::tibble(
+  `Estimated Test AUROC` = mean_valid_auroc_df$logistic,
+  `Observed Test AUROC` = test_auroc
+)
+```
+
+### Multiple Methods
+
+<div class="panel panel-default padded-panel">
+We next provide an example of how to perform the data splitting scheme when trying to both tune hyperparameters in models and selecting the best model. 
+
+**Models under consideration:**
+
+- Logistic regression
+- Lasso regression (needs tuning)
+- Ridge regression (needs tuning)
+- Random forest (no tuning; using default hyperparameters)
+
+Note that within `glmnet::cv.glmnet`, there is an interior cross-validation loop to tune the hyperparameters for LASSO and ridge, and by explicitly setting the `foldid`, we ensure that the cross-validation is done using our clustered sampling scheme by image block. If the R function doesn't have a built-in CV option, we would need to code this up ourselves (or using other functions like from the `caret` R package).
+</div>
+
+```{r}
+train_data <- cloud_data |>
+  dplyr::filter(!(image %in% test_image_idx))
+test_data <- cloud_data |>
+  dplyr::filter(image %in% test_image_idx)
+
+# evaluate validation error for various models
+valid_auroc_ls <- list()
+valid_preds_ls <- list()
+for (fold in unique(train_data_all$block_id)) {
+  # do data split
+  cv_train_data_all <- train_data_all |> 
+    dplyr::filter(block_id != !!fold)
+  cv_train_data <- cv_train_data_all |> 
+    dplyr::select(tidyselect::all_of(keep_vars))
+  cv_valid_data_all <- train_data_all |> 
+    dplyr::filter(block_id == !!fold)
+  cv_valid_data <- cv_valid_data_all |> 
+    dplyr::select(tidyselect::all_of(keep_vars))
+  
+  # fit logistic regression
+  log_fit <- glm(
+    binary_label ~ ., data = cv_train_data, family = "binomial"
+  )
+  log_preds <- predict(log_fit, cv_valid_data, type = "response")
+  
+  # fit and evaluate lasso regression
+  lasso_fit <- glmnet::cv.glmnet(
+    x = as.matrix(cv_train_data |> dplyr::select(-binary_label)),
+    y = cv_train_data$binary_label,
+    family = "binomial",
+    alpha = 1,
+    foldid = as.numeric(as.factor(cv_train_data_all$block_id))
+  )
+  lasso_preds <- predict(
+    lasso_fit, 
+    as.matrix(cv_valid_data |> dplyr::select(-binary_label)), 
+    s = "lambda.min", # or "lambda.1se"
+    type = "response"
+  )
+  
+  # fit and evaluate ridge regression
+  ridge_fit <- glmnet::cv.glmnet(
+    x = as.matrix(cv_train_data |> dplyr::select(-binary_label)),
+    y = cv_train_data$binary_label,
+    family = "binomial",
+    alpha = 0,
+    foldid = as.numeric(as.factor(cv_train_data_all$block_id))
+  )
+  ridge_preds <- predict(
+    ridge_fit, 
+    as.matrix(cv_valid_data |> dplyr::select(-binary_label)), 
+    s = "lambda.min", # or "lambda.1se"
+    type = "response"
+  )
+  
+  # fit random forest
+  rf_fit <- ranger::ranger(
+    binary_label ~ ., data = cv_train_data, 
+    probability = TRUE, verbose = FALSE
+  )
+  rf_preds <- predict(rf_fit, cv_valid_data)$predictions[, 2]
+  
+  # evaluate predictions
+  preds_ls <- list(
+    "logistic" = log_preds,
+    "lasso" = lasso_preds,
+    "ridge" = ridge_preds,
+    "rf" = rf_preds
+  )
+  valid_auroc_ls[[fold]] <- purrr::map(
+    preds_ls,
+    ~ yardstick::roc_auc_vec(
+      truth = cv_valid_data$binary_label, 
+      estimate = c(.x), 
+      event_level = "second"
+    )
+  ) |>
+    dplyr::bind_rows(.id = "method")
+  
+  # save fold predictions for future investigation
+  valid_preds_ls[[fold]] <- cv_valid_data_all |> 
+    dplyr::bind_cols(preds_ls)
+}
+
+# examine validation accuracy
+valid_auroc_df <- dplyr::bind_rows(valid_auroc_ls, .id = "fold")
+mean_valid_auroc_df <- valid_auroc_df |> 
+  dplyr::summarise(dplyr::across(-fold, ~ mean(.x, na.rm = TRUE)))
+
+# evaluate best model on test set
+train_data <- train_data_all |> 
+  dplyr::select(tidyselect::all_of(keep_vars))
+test_data <- test_data_all |>
+  dplyr::select(tidyselect::all_of(keep_vars))
+best_fit <- ranger::ranger(
+  binary_label ~ ., data = train_data, probability = TRUE, verbose = FALSE
+)
+test_preds <- predict(best_fit, test_data)$predictions[, 2]
+test_auroc <- yardstick::roc_auc_vec(
+  truth = test_data$binary_label, 
+  estimate = test_preds, 
+  event_level = "second"
+)
+
+err_df <- mean_valid_auroc_df |>
+  dplyr::rename_with(~ sprintf("Validation %s AUROC", stringr::str_to_title(.x))) |> 
+  dplyr::mutate(
+    `Test AUROC` = test_auroc
+  )
+
+vthemes::pretty_kable(
+  valid_auroc_df, caption = "Fold-wise Validation AUROC for Various Models"
+)
+vthemes::pretty_kable(
+  err_df, caption = "Overall Prediction Performance"
+)
+```
+
+### Including Engineered Features
+
+<div class="panel panel-default padded-panel">
+Engineering features based upon prior or domain knowledge can greatly improve the accuracy of our models. In [Shi et al. (2008)](https://www.jstor.org/stable/27640081), the authors engineered three additional features:
+
+- NDAI: measures difference in reflectance values between different radiance angles (or spectral bands)
+- CORR: measures correlation between the different radiance angles
+- SD: measures variability in reflectance values surrounding the pixel
+</div>
+
+```{r}
+keep_vars <- c("NDAI", "SD", "CORR", keep_vars)
+
+# evaluate validation error for various models
+valid_auroc_ls <- list()
+valid_preds_ls <- list()
+for (fold in unique(train_data_all$block_id)) {
+  # do data split
+  cv_train_data_all <- train_data_all |> 
+    dplyr::filter(block_id != !!fold)
+  cv_train_data <- cv_train_data_all |> 
+    dplyr::select(tidyselect::all_of(keep_vars))
+  cv_valid_data_all <- train_data_all |> 
+    dplyr::filter(block_id == !!fold)
+  cv_valid_data <- cv_valid_data_all |> 
+    dplyr::select(tidyselect::all_of(keep_vars))
+  
+  # fit logistic regression
+  log_fit <- glm(
+    binary_label ~ ., data = cv_train_data, family = "binomial"
+  )
+  log_preds <- predict(log_fit, cv_valid_data, type = "response")
+  
+  # fit and evaluate lasso regression
+  lasso_fit <- glmnet::cv.glmnet(
+    x = as.matrix(cv_train_data |> dplyr::select(-binary_label)),
+    y = cv_train_data$binary_label,
+    family = "binomial",
+    alpha = 1,
+    foldid = as.numeric(as.factor(cv_train_data_all$block_id))
+  )
+  lasso_preds <- predict(
+    lasso_fit, 
+    as.matrix(cv_valid_data |> dplyr::select(-binary_label)), 
+    s = "lambda.min", # or "lambda.1se"
+    type = "response"
+  )
+  
+  # fit and evaluate ridge regression
+  ridge_fit <- glmnet::cv.glmnet(
+    x = as.matrix(cv_train_data |> dplyr::select(-binary_label)),
+    y = cv_train_data$binary_label,
+    family = "binomial",
+    alpha = 0,
+    foldid = as.numeric(as.factor(cv_train_data_all$block_id))
+  )
+  ridge_preds <- predict(
+    ridge_fit, 
+    as.matrix(cv_valid_data |> dplyr::select(-binary_label)), 
+    s = "lambda.min", # or "lambda.1se"
+    type = "response"
+  )
+  
+  # fit random forest
+  rf_fit <- ranger::ranger(
+    binary_label ~ ., data = cv_train_data, 
+    probability = TRUE, verbose = FALSE
+  )
+  rf_preds <- predict(rf_fit, cv_valid_data)$predictions[, 2]
+  
+  # evaluate predictions
+  preds_ls <- list(
+    "logistic" = log_preds,
+    "lasso" = lasso_preds,
+    "ridge" = ridge_preds,
+    "rf" = rf_preds
+  )
+  valid_auroc_ls[[fold]] <- purrr::map(
+    preds_ls,
+    ~ yardstick::roc_auc_vec(
+      truth = cv_valid_data$binary_label, 
+      estimate = c(.x), 
+      event_level = "second"
+    )
+  ) |>
+    dplyr::bind_rows(.id = "method")
+  
+  # save fold predictions for future investigation
+  valid_preds_ls[[fold]] <- cv_valid_data_all |> 
+    dplyr::bind_cols(preds_ls)
+}
+
+# examine validation accuracy
+valid_auroc_df <- dplyr::bind_rows(valid_auroc_ls, .id = "fold")
+mean_valid_auroc_df <- valid_auroc_df |> 
+  dplyr::summarise(dplyr::across(-fold, ~ mean(.x, na.rm = TRUE)))
+
+# evaluate best model on test set
+train_data <- train_data_all |> 
+  dplyr::select(tidyselect::all_of(keep_vars))
+test_data <- test_data_all |>
+  dplyr::select(tidyselect::all_of(keep_vars))
+best_fit <- ranger::ranger(
+  binary_label ~ ., data = train_data, probability = TRUE, verbose = FALSE
+)
+test_preds <- predict(best_fit, test_data)$predictions[, 2]
+test_auroc <- yardstick::roc_auc_vec(
+  truth = test_data$binary_label, 
+  estimate = test_preds, 
+  event_level = "second"
+)
+
+new_err_df <- mean_valid_auroc_df |>
+  dplyr::rename_with(~ sprintf("Validation %s AUROC", stringr::str_to_title(.x))) |> 
+  dplyr::mutate(
+    `Test AUROC` = test_auroc
+  )
+new_err_df <- list(
+  "Raw Features Only" = err_df,
+  "Including Engineered Features" = new_err_df
+) |> 
+  dplyr::bind_rows(.id = "Feature Set")
+
+vthemes::pretty_kable(
+  valid_auroc_df, caption = "Fold-wise Validation AUROC for Various Models"
+)
+vthemes::pretty_kable(new_err_df)
+```
+
+#### Post-hoc investigations
+
+Let's look at the held-out folds where the methods didn't perform so well and compare the predictions across methods.
+
+```{r}
+fold <- "10"
+preds_df <- valid_preds_ls[[fold]]
+plot_vars <- c(
+  "binary_label", "logistic", "lasso", "ridge", "rf",
+  "DF", "CF", "BF", "AF", "AN", "NDAI", "SD", "CORR"
+)
+plt_ls <- list()
+for (var in plot_vars) {
+  plt_ls[[var]] <- plot_cloud_data(preds_df, var)
+}
+plt <- patchwork::wrap_plots(plt_ls, ncol = 5)
+plt
+
+# plt <- plot_pairs(
+#   preds_df, columns = c("logistic", "lasso", "ridge", "rf"),
+#   point_size = 0.1, color = preds_df$binary_label
+# ) +
+#   ggplot2::scale_color_manual(values = cloud_colors) +
+#   ggplot2::scale_fill_manual(values = cloud_colors
+# )
+# plt
+```
+
+
+# Interpretations
+
+To be continued...
