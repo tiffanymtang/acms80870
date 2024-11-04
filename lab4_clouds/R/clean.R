@@ -1,9 +1,12 @@
 #' Clean cloud data
 #'
 #' @param data list of 3 data frames of the 3 cloud images data
+#' @param unsure_class class to assign to unsure labels (default: "No Clouds")
 #'
 #' @return a list of 3 cleaned data frames of the 3 cloud images data
-clean_cloud_data <- function(data) {
+clean_cloud_data <- function(data, unsure_class = c("No Clouds", "Clouds")) {
+  unsure_class <- match.arg(unsure_class)
+
   # informative column names
   cnames <- c(
     'y', 'x', 'label', 'NDAI', 'SD', 'CORR', 'DF', 'CF', 'BF', 'AF', 'AN'
@@ -13,7 +16,7 @@ clean_cloud_data <- function(data) {
   cloud_data_ls <- purrr::map(
     data,
     function(cloud_data) {
-      cloud_data |>
+      cloud_data <- cloud_data |>
         setNames(cnames) |>
         dplyr::mutate(
           label = factor(label, levels = c("-1", "1", "0")) |>
@@ -21,10 +24,20 @@ clean_cloud_data <- function(data) {
               "No Clouds" = "-1",
               "Unsure" = "0",
               "Clouds" = "1"
-            ),
-          binary_label = forcats::fct_recode(label, "No Clouds" = "Unsure")
-          # binary_label = forcats::fct_recode(label, "Clouds" = "Unsure")
+            )
         )
+      if (unsure_class == "No Clouds") {
+        cloud_data <- cloud_data |>
+          dplyr::mutate(
+            binary_label = forcats::fct_recode(label, "No Clouds" = "Unsure")
+          )
+      } else {
+        cloud_data <- cloud_data |>
+          dplyr::mutate(
+            binary_label = forcats::fct_recode(label, "Clouds" = "Unsure")
+          )
+      }
+      return(cloud_data)
     }
   )
 

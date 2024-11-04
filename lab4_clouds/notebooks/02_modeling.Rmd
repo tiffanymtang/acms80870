@@ -435,7 +435,7 @@ new_valid_auprc_df <- dplyr::bind_rows(valid_auprc_ls, .id = "fold") |>
   dplyr::rename_with(~ sprintf("%s (new)", stringr::str_to_title(.x))) |> 
   dplyr::rename(fold = "Fold (new)") |> 
   dplyr::left_join(valid_auprc_df, by = "fold")
-new_mean_valid_auprc_df <- valid_auprc_df |> 
+new_mean_valid_auprc_df <- new_valid_auprc_df |> 
   dplyr::summarise(dplyr::across(-fold, ~ mean(.x, na.rm = TRUE)))
 
 # evaluate best model on test set
@@ -463,21 +463,11 @@ new_auroc_df <- new_mean_valid_auroc_df |>
   dplyr::mutate(
     `Test AUROC` = test_auroc
   )
-new_auroc_df <- list(
-  "Raw Features Only" = auroc_df,
-  "Including Engineered Features" = new_auroc_df
-) |> 
-  dplyr::bind_rows(.id = "Feature Set")
 new_auprc_df <- new_mean_valid_auprc_df |>
   dplyr::rename_with(~ sprintf("Validation %s AUPRC", stringr::str_to_title(.x))) |> 
   dplyr::mutate(
     `Test AUPRC` = test_auprc
   )
-new_auprc_df <- list(
-  "Raw Features Only" = auprc_df,
-  "Including Engineered Features" = new_auprc_df
-) |> 
-  dplyr::bind_rows(.id = "Feature Set")
 
 vthemes::pretty_kable(
   new_valid_auroc_df, caption = "Fold-wise Validation AUROC for Various Models"
