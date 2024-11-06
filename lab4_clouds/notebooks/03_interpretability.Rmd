@@ -1,0 +1,612 @@
+---
+title: "Supervised Learning with Clouds Data"
+author: "Tiffany Tang"
+date: "`r Sys.Date()`"
+output: 
+  vthemes::vmodern:
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE
+)
+
+source(here::here("R", "load.R"))
+source(here::here("R", "clean.R"))
+source(here::here("R", "plot.R"))
+
+subchunk_idx <- 1
+set.seed(242)
+
+cloud_colors <- c("dark green", "light blue", "black")
+```
+
+# Load and clean data {.tabset .tabset-vmodern}
+
+```{r}
+cloud_data_orig <- load_cloud_data()
+cloud_data_ls <- clean_cloud_data(cloud_data_orig)
+cloud_data <- dplyr::bind_rows(cloud_data_ls, .id = "image")
+```
+
+# Exploratory Data Analysis {.tabset .tabset-vmodern}
+
+## Raw Images {.tabset .tabset-pills .tabset-square}
+
+```{r results = "asis"}
+raw_features <- c("DF", "CF", "BF", "AF", "AN")
+for (var in c("label", raw_features)) {
+  cat(sprintf("\n\n### %s\n\n", var))
+  plt <- plot_cloud_data(cloud_data, var)
+  vthemes::subchunkify(
+    plt, i = subchunk_idx, fig_width = 10, fig_height = 4
+  )
+  subchunk_idx <- subchunk_idx + 1
+}
+```
+
+## Correlations {.tabset .tabset-pills .tabset-square}
+
+```{r results = "asis"}
+for (image_id in unique(cloud_data$image)) {
+  plt_df <- cloud_data |> 
+    dplyr::filter(image == !!image_id)
+  plt <- plot_pairs(
+    plt_df, columns = c("DF", "CF", "BF", "AF", "AN"), 
+    point_size = 0.1, subsample = 0.5, color = plt_df$label
+  ) +
+    ggplot2::scale_color_manual(values = cloud_colors) +
+    ggplot2::scale_fill_manual(values = cloud_colors) +
+    ggplot2::labs(title = sprintf("Image %s", image_id))
+  vthemes::subchunkify(
+    plt, i = subchunk_idx, fig_width = 10, fig_height = 10
+  )
+  subchunk_idx <- subchunk_idx + 1
+}
+```
+
+## Feature Engineering {.tabset .tabset-pills .tabset-square}
+
+```{r results = "asis"}
+engineered_features <- c("NDAI", "SD", "CORR")
+for (var in c("label", engineered_features)) {
+  cat(sprintf("\n\n### %s\n\n", var))
+  plt <- plot_cloud_data(cloud_data, var)
+  vthemes::subchunkify(
+    plt, i = subchunk_idx, fig_width = 10, fig_height = 4
+  )
+  subchunk_idx <- subchunk_idx + 1
+}
+```
+
+# Prediction Modeling {.tabset .tabset-vmodern}
+
+## Data Splitting 
+
+<div class="panel panel-default padded-panel">
+To mimic the process of how we obtain our future data (in this case, we expect to obtain completely new images), we leave out one full image for the test set. For cross-validation and the training-validation splits, we also perform clustered sampling, where we partition the images into contiguous blocks to maintain the integrity of the image. Below, we show the image blocks used in the data splitting scheme.
+</div>
+
+```{r}
+# divide image into contiguous chunks
+cloud_data <- add_cloud_blocks(cloud_data_ls)
+plt <- plot_cloud_data(cloud_data, var = "block_id")
+plt
+```
+
+```{r}
+# save one image for testing
+test_image_idx <- sample(unique(cloud_data$image), 1)
+train_data_all <- cloud_data |>
+  dplyr::filter(!(image %in% test_image_idx))
+test_data_all <- cloud_data |>
+  dplyr::filter(image %in% test_image_idx)
+print(sprintf("Test image: %s", test_image_idx))
+```
+
+## Modeling
+
+<div class="panel panel-default padded-panel">
+We next use the aforementioned data splitting scheme to both tune model hyperparameters and select the best model from the following candidates:
+
+**Models under consideration:**
+
+- Logistic regression
+- Lasso regression (needs tuning)
+- Ridge regression (needs tuning)
+- Random forest (no tuning; using default hyperparameters)
+
+Note that within `glmnet::cv.glmnet`, there is an interior cross-validation loop to tune the hyperparameters for LASSO and ridge, and by explicitly setting the `foldid`, we ensure that the cross-validation is done using our clustered sampling scheme by image block. If the R function doesn't have a built-in CV option, we would need to code this up ourselves (or using other functions like from the `caret` R package). Within `glmnet::cv.glmnet`, there is also a re-fitting step, where the best hyperparameters are used to fit the model on the full training set.
+
+We will also include the engineered features (NDAI, SD, CORR) since we've seen these to be quite informative for predicting cloud cover.
+</div>
+
+```{r}
+keep_vars <- c("NDAI", "SD", "CORR", "DF", "CF", "BF", "AF", "AN", "binary_label")
+train_data <- cloud_data |>
+  dplyr::filter(!(image %in% test_image_idx))
+test_data <- cloud_data |>
+  dplyr::filter(image %in% test_image_idx)
+
+# evaluate validation error for various models
+valid_fits_ls <- list()
+valid_X_sds_ls <- list()
+valid_auroc_ls <- list()
+valid_auprc_ls <- list()
+valid_preds_ls <- list()
+for (fold in unique(train_data_all$block_id)) {
+  # do data split
+  cv_train_data_all <- train_data_all |> 
+    dplyr::filter(block_id != !!fold)
+  cv_train_data <- cv_train_data_all |> 
+    dplyr::select(tidyselect::all_of(keep_vars))
+  cv_valid_data_all <- train_data_all |> 
+    dplyr::filter(block_id == !!fold)
+  cv_valid_data <- cv_valid_data_all |> 
+    dplyr::select(tidyselect::all_of(keep_vars))
+  
+  # fit logistic regression
+  log_fit <- glm(
+    binary_label ~ ., data = cv_train_data, family = "binomial"
+  )
+  log_preds <- predict(log_fit, cv_valid_data, type = "response")
+  
+  # fit and evaluate lasso regression
+  lasso_fit <- glmnet::cv.glmnet(
+    x = as.matrix(cv_train_data |> dplyr::select(-binary_label)),
+    y = cv_train_data$binary_label,
+    family = "binomial",
+    alpha = 1,
+    foldid = as.numeric(as.factor(cv_train_data_all$block_id))
+  )
+  lasso_preds <- predict(
+    lasso_fit, 
+    as.matrix(cv_valid_data |> dplyr::select(-binary_label)), 
+    s = "lambda.min", # or "lambda.1se"
+    type = "response"
+  )
+  
+  # fit and evaluate ridge regression
+  ridge_fit <- glmnet::cv.glmnet(
+    x = as.matrix(cv_train_data |> dplyr::select(-binary_label)),
+    y = cv_train_data$binary_label,
+    family = "binomial",
+    alpha = 0,
+    foldid = as.numeric(as.factor(cv_train_data_all$block_id))
+  )
+  ridge_preds <- predict(
+    ridge_fit, 
+    as.matrix(cv_valid_data |> dplyr::select(-binary_label)), 
+    s = "lambda.min", # or "lambda.1se"
+    type = "response"
+  )
+  
+  # fit random forest
+  rf_fit <- ranger::ranger(
+    binary_label ~ ., data = cv_train_data, 
+    importance = "impurity", # to compute MDI importance
+    probability = TRUE, verbose = FALSE
+  )
+  rf_preds <- predict(rf_fit, cv_valid_data)$predictions[, 2]
+  
+  # evaluate predictions
+  preds_ls <- list(
+    "logistic" = log_preds,
+    "lasso" = lasso_preds,
+    "ridge" = ridge_preds,
+    "rf" = rf_preds
+  )
+  valid_auroc_ls[[fold]] <- purrr::map(
+    preds_ls,
+    ~ yardstick::roc_auc_vec(
+      truth = cv_valid_data$binary_label, 
+      estimate = c(.x), 
+      event_level = "second"
+    )
+  ) |>
+    dplyr::bind_rows(.id = "method")
+  valid_auprc_ls[[fold]] <- purrr::map(
+    preds_ls,
+    ~ yardstick::pr_auc_vec(
+      truth = cv_valid_data$binary_label, 
+      estimate = c(.x), 
+      event_level = "second"
+    )
+  ) |>
+    dplyr::bind_rows(.id = "method")
+  
+  # save fold predictions for future investigation
+  valid_preds_ls[[fold]] <- cv_valid_data_all |> 
+    dplyr::bind_cols(preds_ls)
+  
+  # save fitted models
+  valid_fits_ls[[fold]] <- list(
+    "logistic" = log_fit,
+    "lasso" = lasso_fit,
+    "ridge" = ridge_fit,
+    "rf" = rf_fit
+  )
+  
+  # save X standard deviations to normalize ridge/lasso coefficients later
+  valid_X_sds_ls[[fold]] <- cv_train_data |> 
+    dplyr::select(-binary_label) |> 
+    apply(2, sd)
+}
+
+# examine validation accuracy
+valid_auroc_df <- dplyr::bind_rows(valid_auroc_ls, .id = "fold")
+mean_valid_auroc_df <- valid_auroc_df |> 
+  dplyr::summarise(dplyr::across(-fold, ~ mean(.x, na.rm = TRUE)))
+valid_auprc_df <- dplyr::bind_rows(valid_auprc_ls, .id = "fold")
+mean_valid_auprc_df <- valid_auprc_df |> 
+  dplyr::summarise(dplyr::across(-fold, ~ mean(.x, na.rm = TRUE)))
+
+# evaluate best model on test set
+train_data <- train_data_all |> 
+  dplyr::select(tidyselect::all_of(keep_vars))
+test_data <- test_data_all |>
+  dplyr::select(tidyselect::all_of(keep_vars))
+best_fit <- ranger::ranger(
+  binary_label ~ ., data = train_data, probability = TRUE, verbose = FALSE
+)
+test_preds <- predict(best_fit, test_data)$predictions[, 2]
+test_auroc <- yardstick::roc_auc_vec(
+  truth = test_data$binary_label, 
+  estimate = test_preds, 
+  event_level = "second"
+)
+test_auprc <- yardstick::pr_auc_vec(
+  truth = test_data$binary_label, 
+  estimate = test_preds, 
+  event_level = "second"
+)
+
+auroc_df <- mean_valid_auroc_df |>
+  dplyr::rename_with(~ sprintf("Validation %s AUROC", stringr::str_to_title(.x))) |> 
+  dplyr::mutate(
+    `Test AUROC` = test_auroc
+  )
+auprc_df <- mean_valid_auprc_df |>
+  dplyr::rename_with(~ sprintf("Validation %s AUPRC", stringr::str_to_title(.x))) |> 
+  dplyr::mutate(
+    `Test AUPRC` = test_auprc
+  )
+
+vthemes::pretty_kable(
+  valid_auroc_df, caption = "Fold-wise Validation AUROC for Various Models"
+)
+vthemes::pretty_kable(
+  auroc_df, caption = "Overall AUROC Prediction Performance"
+)
+vthemes::pretty_kable(
+  valid_auprc_df, caption = "Fold-wise Validation AUPRC for Various Models"
+)
+vthemes::pretty_kable(
+  auprc_df, caption = "Overall AUPRC Prediction Performance"
+)
+```
+
+### Post-hoc investigations {.tabset .tabset-pills .tabset-pills-square}
+
+Let's look at the held-out folds where the methods didn't perform so well and compare the predictions across methods.
+
+```{r results = "asis"}
+plot_vars <- c(
+  "binary_label", "logistic", "lasso", "ridge", "rf",
+  "DF", "CF", "BF", "AF", "AN", "NDAI", "SD", "CORR"
+)
+for (fold in names(valid_preds_ls)) {
+  cat(sprintf("\n\n#### Fold %s\n\n", fold))
+  preds_df <- valid_preds_ls[[fold]]
+  plt_ls <- list()
+  for (var in plot_vars) {
+    plt_ls[[var]] <- plot_cloud_data(preds_df, var)
+  }
+  plt <- patchwork::wrap_plots(plt_ls, ncol = 5)
+  vthemes::subchunkify(
+    plt, i = subchunk_idx, fig_width = 14, fig_height = 6
+  )
+  subchunk_idx <- subchunk_idx + 1
+}
+```
+
+
+# Interpretations {.tabset .tabset-vmodern}
+
+```{r results = "asis"}
+fi_ls <- list()
+for (fold in names(valid_fits_ls)) {
+  # get feature importances from each method
+  log_fit <- valid_fits_ls[[fold]]$logistic
+  log_fi_df1 <- tibble::tibble(
+    method = "logistic (coef)",
+    var = names(coef(log_fit))[-1], # remove first element (i.e., intercept)
+    importance = coef(log_fit)[-1]
+  )
+  log_fi_df2 <- tibble::tibble(
+    method = "logistic (z stat)",
+    var = names(summary(log_fit)$coefficients[, "z value"])[-1],
+    importance = summary(log_fit)$coefficients[, "z value"][-1],
+  )
+  
+  lasso_fit <- valid_fits_ls[[fold]]$lasso
+  lasso_fi_df1 <- tibble::tibble(
+    method = "lasso (coef)",
+    var = rownames(coef(lasso_fit, s = "lambda.min"))[-1],
+    importance = as.matrix(coef(lasso_fit, s = "lambda.min"))[-1]
+  )
+  lasso_fi_df2 <- tibble::tibble(
+    method = "lasso (std. coef)",
+    var = rownames(coef(lasso_fit, s = "lambda.min"))[-1],
+    importance = as.matrix(coef(lasso_fit, s = "lambda.min"))[-1] *
+      valid_X_sds_ls[[fold]]
+  )
+  
+  ridge_fit <- valid_fits_ls[[fold]]$ridge
+  ridge_fi_df1 <- tibble::tibble(
+    method = "ridge (coef)",
+    var = rownames(coef(ridge_fit, s = "lambda.min"))[-1],
+    importance = as.matrix(coef(ridge_fit, s = "lambda.min"))[-1]
+  )
+  ridge_fi_df2 <- tibble::tibble(
+    method = "ridge (std. coef)",
+    var = rownames(coef(ridge_fit, s = "lambda.min"))[-1],
+    importance = as.matrix(coef(ridge_fit, s = "lambda.min"))[-1] *
+      valid_X_sds_ls[[fold]]
+  )
+  
+  rf_fit <- valid_fits_ls[[fold]]$rf
+  rf_fi_df1 <- tibble::tibble(
+    method = "rf (mdi)",
+    var = names(rf_fit$variable.importance),
+    importance = rf_fit$variable.importance
+  )
+  # compute permutation importance using held-out fold (not training folds)
+  X_valid_df <- train_data_all |>
+    dplyr::filter(block_id == !!fold) |>
+    dplyr::select(tidyselect::all_of(keep_vars))
+  pfun <- function(object, newdata) {
+    # Needs to return vector of class predictions from a ranger object (if using metric = "accuracy")
+    ifelse(
+      predict(object, data = newdata)$predictions[, 2] >= 0.5,
+      "Clouds",
+      "No Clouds"
+    ) |>
+      factor(levels = c("No Clouds", "Clouds"))
+  }
+  permute_imp <- vip::vi(
+    rf_fit, method = "permute", train = X_valid_df, target = "binary_label",
+    metric = "accuracy", pred_wrapper = pfun, nsim = 10
+  )
+  rf_fi_df2 <- tibble::tibble(
+    method = "rf (permutation)",
+    var = permute_imp$Variable,
+    importance = permute_imp$Importance
+  )
+  
+  fi_ls[[fold]] <- dplyr::bind_rows(
+    log_fi_df1, log_fi_df2, 
+    lasso_fi_df1, lasso_fi_df2, 
+    ridge_fi_df1, ridge_fi_df2, 
+    rf_fi_df1, rf_fi_df2
+  )
+}
+
+fi_df <- dplyr::bind_rows(fi_ls, .id = "fold") |> 
+  dplyr::mutate(
+    var = factor(var, levels = keep_vars)
+  )
+
+for (method_name in c("logistic", "lasso", "ridge", "rf")) {
+  cat(
+    sprintf("\n\n## %s {.tabset .tabset-pills .tabset-pills-square}\n\n", method_name)
+  )
+  
+  plt_df <- fi_df |> 
+    dplyr::filter(
+      stringr::str_starts(method, !!method_name)
+    )
+  
+  # bar plot
+  if (method_name %in% c("logistic", "lasso", "ridge")) {
+    plt <- plt_df |> 
+      dplyr::group_by(method, var) |> 
+      dplyr::summarise(
+        mean_importance = mean(importance),
+        se_importance = sd(importance) / sqrt(dplyr::n()),
+        .groups = "drop"
+      ) |> 
+      dplyr::filter(
+        stringr::str_detect(method, "\\(coef\\)")
+      ) |> 
+      ggplot2::ggplot() +
+      ggplot2::geom_bar(
+        ggplot2::aes(x = var, y = mean_importance),
+        stat = "identity"
+      ) +
+      ggplot2::geom_errorbar(
+        ggplot2::aes(
+          x = var, 
+          ymin = mean_importance - se_importance,
+          ymax = mean_importance + se_importance
+        ),
+        width = 0
+      ) +
+      ggplot2::facet_wrap(~ method, ncol = 1, scales = "free_y") +
+      ggplot2::labs(x = "Feature", y = "Mean Importance") +
+      vthemes::theme_vmodern()
+    
+    vthemes::subchunkify(
+      plt, i = subchunk_idx, fig_width = 12, fig_height = 4
+    )
+    subchunk_idx <- subchunk_idx + 1
+  }
+  
+  # bar plot
+  plt <- plt_df |> 
+    dplyr::group_by(method, var) |> 
+    dplyr::summarise(
+      mean_importance = mean(importance),
+      se_importance = sd(importance) / sqrt(dplyr::n()),
+      .groups = "drop"
+    ) |> 
+    ggplot2::ggplot() +
+    ggplot2::geom_bar(
+      ggplot2::aes(x = var, y = mean_importance),
+      stat = "identity"
+    ) +
+    ggplot2::geom_errorbar(
+      ggplot2::aes(
+        x = var, 
+        ymin = mean_importance - se_importance,
+        ymax = mean_importance + se_importance
+      ),
+      width = 0
+    ) +
+    ggplot2::facet_wrap(~ method, ncol = 1, scales = "free_y") +
+    ggplot2::labs(x = "Feature", y = "Mean Importance") +
+    vthemes::theme_vmodern()
+  vthemes::subchunkify(
+    plotly::ggplotly(plt), i = subchunk_idx, fig_width = 12, fig_height = 8
+  )
+  subchunk_idx <- subchunk_idx + 1
+  
+  # boxplot
+  plt <- plt_df |> 
+    ggplot2::ggplot() +
+    ggplot2::geom_boxplot(
+      ggplot2::aes(x = var, y = importance)
+    ) +
+    ggplot2::facet_wrap(~ method, ncol = 1, scales = "free_y") +
+    ggplot2::labs(x = "Feature", y = "Importance") +
+    vthemes::theme_vmodern()
+  vthemes::subchunkify(
+    plt, i = subchunk_idx, fig_width = 12, fig_height = 10
+  )
+  subchunk_idx <- subchunk_idx + 1
+}
+
+# summary of (normalized) feature importance results without absolute value
+cat("\n\n## Summary {.tabset .tabset-pills .tabset-pills-square}\n\n")
+keep_methods <- c(
+  "logistic (z stat)", "lasso (std. coef)", "ridge (std. coef)", "rf (mdi)", "rf (permutation)"
+)
+plt <- fi_df |> 
+  dplyr::filter(
+    method %in% !!keep_methods
+  ) |> 
+  dplyr::mutate(
+    method = factor(method, levels = keep_methods)
+  ) |> 
+  dplyr::group_by(method, var) |> 
+  dplyr::summarise(
+    mean_importance = mean(importance),
+    se_importance = sd(importance) / sqrt(dplyr::n()),
+    .groups = "drop"
+  ) |> 
+  ggplot2::ggplot() +
+  ggplot2::geom_bar(
+    ggplot2::aes(x = var, y = mean_importance),
+    stat = "identity"
+  ) +
+  ggplot2::geom_errorbar(
+    ggplot2::aes(
+      x = var, 
+      ymin = mean_importance - se_importance,
+      ymax = mean_importance + se_importance
+    ),
+    width = 0
+  ) +
+  ggplot2::facet_wrap(~ method, ncol = 1, scales = "free_y") +
+  ggplot2::labs(x = "Feature", y = "Mean Importance") +
+  vthemes::theme_vmodern()
+vthemes::subchunkify(
+  plotly::ggplotly(plt), i = subchunk_idx, fig_width = 12, fig_height = 12
+)
+subchunk_idx <- subchunk_idx + 1
+
+# summary of (normalized) feature importance results with absolute value
+cat("\n\n## Summary (magnitudes only) {.tabset .tabset-pills .tabset-pills-square}\n\n")
+keep_method_levels <- stringr::str_replace_all(keep_methods, "std. coef", "|std. coef|")
+plt <- fi_df |> 
+  dplyr::filter(
+    method %in% !!keep_methods
+  ) |> 
+  dplyr::mutate(
+    importance = dplyr::case_when(
+      stringr::str_detect(method, "logistic|lasso|ridge") ~ abs(importance),
+      TRUE ~ importance
+    ),
+    method = stringr::str_replace_all(method, "std. coef", "|std. coef|") |> 
+      factor(levels = keep_method_levels)
+  ) |> 
+  dplyr::group_by(method, var) |> 
+  dplyr::summarise(
+    mean_importance = mean(importance),
+    se_importance = sd(importance) / sqrt(dplyr::n()),
+    .groups = "drop"
+  ) |> 
+  ggplot2::ggplot() +
+  ggplot2::geom_bar(
+    ggplot2::aes(x = var, y = mean_importance),
+    stat = "identity"
+  ) +
+  ggplot2::geom_errorbar(
+    ggplot2::aes(
+      x = var, 
+      ymin = mean_importance - se_importance,
+      ymax = mean_importance + se_importance
+    ),
+    width = 0
+  ) +
+  ggplot2::facet_wrap(~ method, ncol = 1, scales = "free_y") +
+  ggplot2::labs(x = "Feature", y = "Mean Importance") +
+  vthemes::theme_vmodern()
+vthemes::subchunkify(
+  plotly::ggplotly(plt), i = subchunk_idx, fig_width = 12, fig_height = 12
+)
+subchunk_idx <- subchunk_idx + 1
+```
+
+
+## Partial Dependence Plots {.tabset .tabset-pills .tabset-pills-square}
+
+<div class="panel panel-default padded-panel">
+Let's take a look at the partial dependence plots for the random forest model (for one CV fold). These plots show the effect of each feature on the predicted probability of cloud cover, while holding all other features constant. We can see how the predicted probability changes as we vary each feature.
+</div>
+
+```{r results = "asis"}
+fold <- names(valid_fits_ls)[1]
+rf_fit <- valid_fits_ls[[fold]]$rf
+pfun <- function(object, newdata) {
+  # Needs to return vector of class predictions from a ranger object
+  predict(object, data = newdata)$predictions[, 2]
+}
+rf_pdp_ls <- list()
+for (var in setdiff(colnames(X_valid_df), "binary_label")) {
+  # compute PDP using held-out validation fold
+  X_valid_df <- train_data_all |>
+    dplyr::filter(block_id == !!fold) |>
+    dplyr::select(tidyselect::all_of(keep_vars))
+  
+  rf_pdp_ls[[var]] <- pdp::partial(
+    rf_fit, pred.var = var, train = X_valid_df, pred.fun = pfun, rug = TRUE
+  ) |> 
+    ggplot2::autoplot()
+    ggplot2::ggplot(rf_pdp_ls[[var]]) +
+    ggplot2::aes(x = !!rlang::sym(var), y = yhat) +
+    ggplot2::geom_line() +
+    ggplot2::geom_rug(
+      ggplot2::aes(x = !!rlang::sym(var))
+    ) +
+    ggplot2::labs(
+      x = var, y = "Predicted Probability"
+    ) +
+    vthemes::theme_vmodern()
+}
+```
+
+
