@@ -1,0 +1,469 @@
+---
+title: "Correlated Features"
+author: "Tiffany Tang"
+date: "`r Sys.Date()`"
+output: vthemes::vmodern
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+set.seed(331)
+
+subchunk_idx <- 1
+```
+
+# Correlated Features Simulation {.tabset .tabset-vmodern}
+
+<div class="panel panel-default padded-panel">
+We will first investigate how various feature importance methods treat correlated variables under different simulation scenarios.
+</div>
+
+```{r results = "asis"}
+n <- 500
+p <- 10
+beta <- 1
+noise_sd <- 1
+data_ls <- list()
+vimp_ls <- list()
+fit_ls <- list()
+
+# case 1: independent features
+X <- as.data.frame(matrix(rnorm(n * p), n, p))
+y <- X[, 1] * beta + X[, 2] * beta + rnorm(n, sd = noise_sd)
+data_ls[["Independent Features"]] <- data.frame(y = y, X)
+
+# case 2: correlated non-signal features
+p_cor <- 100
+rho <- 0.9
+sig <- matrix(rho, p_cor, p_cor)
+X_cor <- MASS::mvrnorm(n, mu = rep(0, p_cor), Sigma = sig)
+data_ls[["Correlated Non-signal Features"]] <- dplyr::bind_cols(
+  data.frame(y = y, X), 
+  as.data.frame(X_cor) |> dplyr::rename_with(~ paste0("corr", .x))
+)
+
+# case 3: correlated signal features (one signal)
+sig <- matrix(rho, p_cor + 1, p_cor + 1)
+X_cor <- MASS::mvrnorm(n, mu = rep(0, p_cor + 1), Sigma = sig)
+X[, 1] <- X_cor[, 1]
+X_cor <- X_cor[, -1]
+y <- X[, 1] * beta + X[, 2] * beta + rnorm(n, sd = noise_sd)
+data_ls[["Correlated Signal Features (1 signal)"]] <- dplyr::bind_cols(
+  data.frame(y = y, X), 
+  as.data.frame(X_cor) |> dplyr::rename_with(~ paste0("corr", .x))
+)
+
+# case 4: correlated signal features (many signal)
+y <- X[, 1] * beta + X[, 2] * beta + rowSums(X_cor[, 1:4] * beta) + rnorm(n, sd = noise_sd)
+data_ls[["Correlated Signal Features (many signal)"]] <- dplyr::bind_cols(
+  data.frame(y = y, X), 
+  as.data.frame(X_cor) |> dplyr::rename_with(~ paste0("corr", .x))
+)
+
+for (sim_name in names(data_ls)) {
+  cat(sprintf("\n\n## %s {.tabset .tabset-pills .tabset-square}\n\n", sim_name))
+  
+  data <- data_ls[[sim_name]]
+  y <- data |>
+    dplyr::pull(y)
+  X <- data |> 
+    dplyr::select(-y)
+  
+  # linear regression
+  lm_fit <- lm(y ~ ., data = data)
+  lm_vimp_df <- tibble::tibble(
+    var = names(summary(lm_fit)$coefficients[-1, 1]),
+    vimp = summary(lm_fit)$coefficients[-1, 1],
+    se = summary(lm_fit)$coefficients[-1, 2]
+  )
+  
+  # LASSO regression
+  lasso_fit <- glmnet::cv.glmnet(
+    x = as.matrix(X),
+    y = y,
+    alpha = 1, 
+    nfolds = 5
+  )
+  lasso_vimp_df <- tibble::tibble(
+    var = rownames(coef(lasso_fit, s = "lambda.min"))[-1],
+    vimp = as.matrix(coef(lasso_fit, s = "lambda.min"))[-1]
+  )
+  
+  # ridge regression
+  ridge_fit <- glmnet::cv.glmnet(
+    x = as.matrix(X),
+    y = y,
+    alpha = 0, 
+    nfolds = 5
+  )
+  ridge_vimp_df <- tibble::tibble(
+    var = rownames(coef(ridge_fit, s = "lambda.min"))[-1],
+    vimp = as.matrix(coef(ridge_fit, s = "lambda.min"))[-1]
+  )
+  
+  # random forest (MDI)
+  rf_fit <- ranger::ranger(
+    data = data,
+    formula = y ~ .,
+    importance = "impurity"
+  )
+  rf_vimp_mdi_df <- tibble::tibble(
+    var = names(rf_fit$variable.importance),
+    vimp = rf_fit$variable.importance
+  )
+  
+  # random forest (permutation)
+  rf_fit <- ranger::ranger(
+    data = data,
+    formula = y ~ .,
+    importance = "permutation"
+  )
+  rf_vimp_perm_df <- tibble::tibble(
+    var = names(rf_fit$variable.importance),
+    vimp = rf_fit$variable.importance
+  )
+  
+  # random forest (feature occlusion)
+  oob_errs <- c()  # using out-of-bag error as the metric for simplicity (should generally use held-out test set)
+  for (j in names(rf_fit$variable.importance)) {
+    X_loco_j <- X |>
+      dplyr::select(-tidyselect::all_of(j))
+    rf_fit_j <- ranger::ranger(
+      data = cbind(y = y, X_loco_j),
+      formula = y ~ .
+    )
+    oob_errs[j] <- rf_fit_j$prediction.error
+  }
+  rf_vimp_loco_df <- tibble::tibble(
+    var = names(rf_fit$variable.importance),
+    vimp = oob_errs - rf_fit$prediction.error
+  )
+  
+  # random forest (shap)
+  rf_fit <- ranger::ranger(
+    data = data,
+    formula = y ~ .
+  )
+  pred_fun <- function(object, newdata) {
+    predict(object, newdata)$predictions
+  }
+  shap_values <- fastshap::explain(
+    object = rf_fit,
+    X = X,
+    pred_wrapper = pred_fun,
+    nsim = 10
+  )
+  rf_vimp_shap_df <- as.data.frame(abs(shap_values)) |> 
+    dplyr::summarise(
+      dplyr::across(
+        tidyselect::everything(),
+        ~ mean(.x)
+      )
+    ) |>
+    tidyr::pivot_longer(
+      cols = tidyselect::everything(),
+      names_to = "var",
+      values_to = "vimp"
+    )
+  
+  vimp_df <- list(
+    Linear = lm_vimp_df,
+    LASSO = lasso_vimp_df,
+    Ridge = ridge_vimp_df,
+    `RF (MDI)` = rf_vimp_mdi_df,
+    `RF (permute)` = rf_vimp_perm_df,
+    `RF (SHAP)` = rf_vimp_shap_df,
+    `RF (LOCO)` = rf_vimp_loco_df
+  ) |>
+    dplyr::bind_rows(.id = "method") |> 
+    dplyr::mutate(
+      method = forcats::fct_inorder(method),
+      color = dplyr::case_when(
+        var == "V1" ~ "Signal1",
+        var == "V2" ~ "Signal2",
+        stringr::str_detect(var, "corr") ~ "Correlated",
+        TRUE ~ "Other"
+      ),
+      var = forcats::fct_inorder(var)
+    )
+  
+  plt <- vimp_df |> 
+    ggplot2::ggplot() +
+    ggplot2::aes(x = var, y = vimp, fill = color) +
+    ggplot2::geom_bar(stat = "identity") +
+    ggplot2::facet_wrap(~ method, ncol = 1, scales = "free_y") +
+    ggplot2::labs(x = "Feature", y = "Importance", fill = "") +
+    ggplot2::scale_fill_manual(
+      values = c(
+        Signal1 = "dodgerblue",
+        Signal2 = "darkgreen",
+        Correlated = "orange",
+        Other = "gray"
+      )
+    ) +
+    vthemes::theme_vmodern(
+      x_text_angle = TRUE,
+      size_preset = "large"
+    )
+  fig_width <- dplyr::case_when(
+    ncol(data) > 20 ~ 20,
+    TRUE ~ 10
+  )
+  vthemes::subchunkify(
+    plt, i = subchunk_idx, fig_height = 16, fig_width = fig_width
+  )
+  subchunk_idx <- subchunk_idx + 1
+  
+  fit_ls[[sim_name]] <- list(
+    Linear = lm_fit,
+    LASSO = lasso_fit,
+    Ridge = ridge_fit,
+    `RF` = rf_fit
+  )
+  vimp_ls[[sim_name]] <- vimp_df
+}
+```
+
+# Correlated Features: Ozone data {.tabset .tabset-vmodern}
+
+<div class="panel panel-default padded-panel">
+We will next investigate these different feature importance methods using a real-world dataset, namely the "Ozone" dataset from the `mlbench` R package. Using this dataset, we aim to predict the ozone readings using various meteorological features such as temperature, wind speed, humidity, air pressure, and other related measurements.
+</div>
+
+```{r results = "asis"}
+data("Ozone", package = "mlbench")
+
+# clean data
+data <- Ozone |> 
+  dplyr::select(
+    ozone = V4,
+    temperature = V8,
+    inversion_height = V10,
+    pressure = V11,
+    visibility = V13,
+    millibar_pressure_height = V5,
+    humidity = V7,
+    inversion_temperature = V12,
+    wind = V6
+  )
+na_samples <- apply(data, 1, function(x) any(is.na(x)))
+data <- data[!na_samples, ]
+
+y <- data |>
+  dplyr::pull(ozone)
+X <- data |> 
+  dplyr::select(-ozone)
+
+plt <- data |> 
+  tidyr::pivot_longer(
+    cols = tidyselect::everything(), 
+    names_to = "feature", 
+    values_to = "value"
+  ) |> 
+  ggplot2::ggplot() +
+  ggplot2::aes(x = value) +
+  ggplot2::facet_wrap(~ feature, scales = "free") +
+  ggplot2::geom_histogram(bins = 30) +
+  vthemes::theme_vmodern()
+
+# linear regression
+cat("\n\n## Linear Regression\n\n")
+lm_fit <- lm(ozone ~ ., data = data)
+lm_vimp_df <- tibble::tibble(
+  var = names(summary(lm_fit)$coefficients[-1, 1]),
+  vimp = summary(lm_fit)$coefficients[-1, 1],
+  se = summary(lm_fit)$coefficients[-1, 2]
+)
+broom::tidy(lm_fit) |> 
+  vthemes::pretty_DT()
+
+# LASSO regression
+cat("\n\n## LASSO\n\n")
+lasso_fit <- glmnet::cv.glmnet(
+  x = as.matrix(X),
+  y = y,
+  alpha = 1
+)
+lasso_vimp_df <- tibble::tibble(
+  var = rownames(coef(lasso_fit, s = "lambda.min"))[-1],
+  vimp = as.matrix(coef(lasso_fit, s = "lambda.min"))[-1]
+)
+plot(lasso_fit)
+lasso_path_df <- as.data.frame(as.matrix(lasso_fit$glmnet.fit$beta)) |>
+  setNames(lasso_fit$lambda) |> 
+  tibble::rownames_to_column("Variable") |> 
+  tidyr::pivot_longer(
+    cols = -Variable, 
+    names_to = "Lambda", 
+    values_to = "Coefficient"
+  ) |> 
+  dplyr::mutate(
+    Lambda = as.numeric(Lambda)
+  )
+lasso_path_plt <- lasso_path_df |> 
+  ggplot2::ggplot() +
+  ggplot2::aes(
+    x = log(Lambda),
+    y = Coefficient,
+    color = Variable,
+    group = Variable
+  ) +
+  ggplot2::geom_line(linewidth = 1) +
+  ggplot2::geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  vthemes::theme_vmodern(size_preset = "large")
+vthemes::subchunkify(
+  plotly::ggplotly(lasso_path_plt), i = subchunk_idx,
+  fig_height = 6, fig_width = 10
+)
+subchunk_idx <- subchunk_idx + 1
+
+# ridge regression
+cat("\n\n## Ridge\n\n")
+ridge_fit <- glmnet::cv.glmnet(
+  x = as.matrix(X),
+  y = y,
+  alpha = 0, 
+  nfolds = 5
+)
+ridge_vimp_df <- tibble::tibble(
+  var = rownames(coef(ridge_fit, s = "lambda.min"))[-1],
+  vimp = as.matrix(coef(ridge_fit, s = "lambda.min"))[-1]
+)
+plot(ridge_fit)
+ridge_path_df <- as.data.frame(as.matrix(ridge_fit$glmnet.fit$beta)) |>
+  setNames(ridge_fit$lambda) |> 
+  tibble::rownames_to_column("Variable") |> 
+  tidyr::pivot_longer(
+    cols = -Variable, 
+    names_to = "Lambda", 
+    values_to = "Coefficient"
+  ) |> 
+  dplyr::mutate(
+    Lambda = as.numeric(Lambda)
+  )
+ridge_path_plt <- ridge_path_df |> 
+  ggplot2::ggplot() +
+  ggplot2::aes(
+    x = log(Lambda),
+    y = Coefficient,
+    color = Variable,
+    group = Variable
+  ) +
+  ggplot2::geom_line(linewidth = 1) +
+  ggplot2::geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  vthemes::theme_vmodern(size_preset = "large")
+vthemes::subchunkify(
+  plotly::ggplotly(ridge_path_plt), i = subchunk_idx,
+  fig_height = 6, fig_width = 10
+)
+subchunk_idx <- subchunk_idx + 1
+
+# random forest (MDI)
+rf_fit <- ranger::ranger(
+  data = data,
+  formula = ozone ~ .,
+  importance = "impurity"
+)
+rf_vimp_mdi_df <- tibble::tibble(
+  var = names(rf_fit$variable.importance),
+  vimp = rf_fit$variable.importance
+)
+
+# random forest (permutation)
+rf_fit <- ranger::ranger(
+  data = data,
+  formula = ozone ~ .,
+  importance = "permutation"
+)
+rf_vimp_perm_df <- tibble::tibble(
+  var = names(rf_fit$variable.importance),
+  vimp = rf_fit$variable.importance
+)
+
+# random forest (feature occlusion)
+oob_errs <- c()  # using out-of-bag error as the metric for simplicity (should generally use held-out test set)
+for (j in names(rf_fit$variable.importance)) {
+  X_loco_j <- X |>
+    dplyr::select(-tidyselect::all_of(j))
+  rf_fit_j <- ranger::ranger(
+    data = cbind(y = y, X_loco_j),
+    formula = y ~ .
+  )
+  oob_errs[j] <- rf_fit_j$prediction.error
+}
+rf_vimp_loco_df <- tibble::tibble(
+  var = names(rf_fit$variable.importance),
+  vimp = oob_errs - rf_fit$prediction.error
+)
+
+# random forest (shap)
+rf_fit <- ranger::ranger(
+  data = data,
+  formula = ozone ~ .
+)
+pred_fun <- function(object, newdata) {
+  predict(object, newdata)$predictions
+}
+shap_values <- fastshap::explain(
+  object = rf_fit,
+  X = X,
+  pred_wrapper = pred_fun,
+  nsim = 10
+)
+rf_vimp_shap_df <- as.data.frame(abs(shap_values)) |> 
+  dplyr::summarise(
+    dplyr::across(
+      tidyselect::everything(),
+      ~ mean(.x)
+    )
+  ) |>
+  tidyr::pivot_longer(
+    cols = tidyselect::everything(),
+    names_to = "var",
+    values_to = "vimp"
+  )
+
+cat("\n\n## Summary\n\n")
+vimp_df <- list(
+  Linear = lm_vimp_df,
+  LASSO = lasso_vimp_df,
+  Ridge = ridge_vimp_df,
+  `RF (MDI)` = rf_vimp_mdi_df,
+  `RF (permute)` = rf_vimp_perm_df,
+  `RF (SHAP)` = rf_vimp_shap_df,
+  `RF (LOCO)` = rf_vimp_loco_df
+) |>
+  dplyr::bind_rows(.id = "method") |> 
+  dplyr::mutate(
+    method = forcats::fct_inorder(method)
+  )
+
+plt <- vimp_df |> 
+  ggplot2::ggplot() +
+  ggplot2::aes(x = var, y = vimp) +
+  ggplot2::geom_bar(stat = "identity") +
+  ggplot2::facet_wrap(~ method, ncol = 1, scales = "free_y") +
+  ggplot2::labs(x = "Feature", y = "Importance", fill = "") +
+  vthemes::theme_vmodern(
+    x_text_angle = TRUE,
+    size_preset = "large"
+  )
+
+vthemes::subchunkify(
+  # Plot the heatmap
+  corrplot::corrplot(
+    cor(X), method = "color", order = "hclust",
+    col = colorRampPalette(c("blue", "white", "red"))(15),
+    addCoef.col = "black", # Add correlation coefficients
+    tl.col = "black", tl.srt = 45 # Rotate text labels
+  ),
+  i = subchunk_idx, fig_height = 10, fig_width = 10
+)
+subchunk_idx <- subchunk_idx + 1
+vthemes::subchunkify(
+  plt, i = subchunk_idx, fig_height = 16, fig_width = 10
+)
+subchunk_idx <- subchunk_idx + 1
+```
+
+
